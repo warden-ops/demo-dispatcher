@@ -90,6 +90,11 @@ export function TechRoster({
                       onChange(tech.id, { region: event.target.value })
                     }
                   >
+                    <option value="">Non précisée</option>
+                    {tech.region &&
+                    !(REGIONS as readonly string[]).includes(tech.region) ? (
+                      <option value={tech.region}>{tech.region}</option>
+                    ) : null}
                     {REGIONS.map((region) => (
                       <option key={region}>{region}</option>
                     ))}
