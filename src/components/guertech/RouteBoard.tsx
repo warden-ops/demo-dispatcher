@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { RouteMap } from "@/components/RouteMap";
 import { ScheduleCalendar } from "@/components/guertech/ScheduleCalendar";
 import { DRUMMONDVILLE_CENTER } from "@/lib/guertech/constants";
@@ -59,17 +59,12 @@ export function RouteBoard({
 
   const [copyState, setCopyState] = useState("Copier le lien");
 
-  const mapsUrl = useMemo(
-    () => (current?.google ? buildGoogleMapsRouteUrl(current.google) : ""),
-    [current],
-  );
-  const shareText = useMemo(
-    () =>
-      current?.google
-        ? buildRouteShareText(current.google, current.tech.name)
-        : "",
-    [current],
-  );
+  const mapsUrl = current?.google
+    ? buildGoogleMapsRouteUrl(current.google)
+    : "";
+  const shareText = current?.google
+    ? buildRouteShareText(current.google, current.tech.name)
+    : "";
 
   if (!current) {
     return (

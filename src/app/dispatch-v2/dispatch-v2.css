@@ -351,6 +351,19 @@
   color: var(--gt-navy);
 }
 
+.gt-source {
+  margin: 0.35rem 0 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--gt-muted);
+}
+
+.gt-source[data-source="netsuite"] {
+  color: var(--gt-navy);
+}
+
 .gt-header h1 {
   margin: 0.2rem 0 0;
   font-family: var(--font-display);

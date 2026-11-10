@@ -79,6 +79,9 @@ function CallCard({
                 }
               >
                 <option value="">Choisir</option>
+                {appel.heure && !TIME_SLOTS.includes(appel.heure) ? (
+                  <option value={appel.heure}>{appel.heure}</option>
+                ) : null}
                 {TIME_SLOTS.map((slot) => (
                   <option key={slot} value={slot}>
                     {slot}
@@ -94,6 +97,12 @@ function CallCard({
                   onUpdate(appel.id, { techId: event.target.value })
                 }
               >
+                {appel.techId &&
+                !techs.some((tech) => tech.id === appel.techId) ? (
+                  <option value={appel.techId}>
+                    Technicien {appel.techId}
+                  </option>
+                ) : null}
                 {techs.map((tech) => (
                   <option key={tech.id} value={tech.id}>
                     {tech.name}

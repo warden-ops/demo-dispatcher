@@ -25,7 +25,7 @@ const STEPS = [
   },
   {
     title: "NetSuite",
-    body: "Pousser vers NetSuite est une démo seulement — aucun envoi réel.",
+    body: "Envoyer à NetSuite écrit les arrêts du calendrier dans le sandbox si l'écriture est activée. En mode démo, aucun envoi.",
   },
 ] as const;
 

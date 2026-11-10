@@ -6,14 +6,16 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start -H 127.0.0.1 -p 3010",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node --require ./scripts/stub-server-only.cjs --import tsx --test src/lib/netsuite/*.test.ts src/lib/guertech/*.test.ts"
   },
   "dependencies": {
     "@googlemaps/polyline-codec": "^1.0.28",
     "@vis.gl/react-google-maps": "^1.9.0",
     "next": "16.3.0",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "server-only": "^0.0.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -24,6 +26,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.0",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5"
   }
 }

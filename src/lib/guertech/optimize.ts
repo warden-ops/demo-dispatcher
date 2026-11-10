@@ -128,7 +128,7 @@ export function trimToSoftEnd(
   stops: DayStop[],
 ): { stops: DayStop[]; removed: DayStop[] } {
   const soft = softEndFor(tech);
-  let current = [...stops];
+  const current = [...stops];
   const removed: DayStop[] = [];
 
   while (current.length > 0) {

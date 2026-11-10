@@ -147,6 +147,10 @@ function Workspace() {
   const [calls, setCalls] = useState<Appel[]>([]);
   const [techs, setTechs] = useState<Tech[]>(() => createBlankRoster());
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [dataSource, setDataSource] = useState<"demo" | "netsuite" | null>(
+    null,
+  );
+  const [sending, setSending] = useState(false);
   const [date, setDate] = useState(todayIsoDate);
   const [moveAssigned, setMoveAssigned] = useState<boolean | null>(null);
   const [pmQuota, setPmQuota] = useState("");
@@ -219,13 +223,31 @@ function Workspace() {
   );
 
   useEffect(() => {
+    let cancelled = false;
     loadAppels()
-      .then((rows) => setCalls(blankCallAssignments(rows)))
-      .catch((err: unknown) =>
+      .then((loaded) => {
+        if (cancelled) return;
+        if (loaded.source === "netsuite") {
+          setCalls(loaded.appels);
+          if (loaded.techs) {
+            setTechs(loaded.techs);
+            setPresenceTouched(new Set());
+          }
+        } else {
+          setCalls(blankCallAssignments(loaded.appels));
+        }
+        setDataSource(loaded.source);
+        if (loaded.warning) setLoadError(loaded.warning);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
         setLoadError(
           err instanceof Error ? err.message : "Chargement impossible",
-        ),
-      );
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const reactifPendingCount = useMemo(
@@ -421,7 +443,7 @@ function Workspace() {
     setError(null);
     setToast(null);
     if (calls.length === 0) {
-      setError("Liste d'appels encore vide — attendez le chargement du CSV.");
+      setError("Liste d'appels encore vide. Attendez la fin du chargement.");
       return;
     }
 
@@ -548,7 +570,7 @@ function Workspace() {
         const ordered = [...list].sort(
           (a, b) => a.suggestedStartMin - b.suggestedStartMin,
         );
-        let nextStops = [...route.stops];
+        const nextStops = [...route.stops];
         for (const suggestion of ordered) {
           const newStop: DayStop = {
             appel: { ...suggestion.appel, techId },
@@ -719,6 +741,60 @@ function Workspace() {
     }
   }, [routes]);
 
+  async function sendToNetsuite() {
+    if (sending) return;
+    const items = (routes ?? []).flatMap((route) =>
+      route.stops.map((stop) => {
+        const caseId = /^\d+$/.test(stop.appel.netsuiteId)
+          ? stop.appel.netsuiteId
+          : undefined;
+        return {
+          taskId: stop.appel.id,
+          techId: route.tech.id,
+          date: effectiveDate,
+          heure: stop.appel.heure || undefined,
+          status: "NOTSTART" as const,
+          caseId,
+          caseStatus: caseId ? "1" : undefined,
+        };
+      }),
+    );
+    if (items.length === 0) {
+      setToast("Aucun arrêt à envoyer. Planifiez la journée d'abord.");
+      setError(null);
+      return;
+    }
+
+    setSending(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/netsuite/dispatch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(items),
+      });
+      const data = (await response.json()) as {
+        error?: string;
+        updated?: number;
+        failed?: number;
+      };
+      if (!response.ok) {
+        throw new Error(data.error || "Envoi NetSuite refusé.");
+      }
+      setToast(
+        data.failed
+          ? `${data.updated ?? 0} tâche(s) mises à jour, ${data.failed} échec(s).`
+          : `${data.updated ?? items.length} tâche(s) envoyées à NetSuite (sandbox).`,
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Envoi NetSuite impossible.",
+      );
+    } finally {
+      setSending(false);
+    }
+  }
+
   async function rebuildDay(options?: {
     workingCalls?: Appel[];
     workingTechs?: Tech[];
@@ -743,7 +819,7 @@ function Workspace() {
       (pmQuotaNumber > 0 ? pmQuotaNumber : Math.ceil(avgPreventifPerDay));
 
     if (workingCalls.length === 0) {
-      setError("Liste d'appels encore vide — attendez le chargement du CSV.");
+      setError("Liste d'appels encore vide. Attendez la fin du chargement.");
       return;
     }
 
@@ -901,6 +977,17 @@ function Workspace() {
         <div>
           <p className="gt-kicker">Dispatch v2</p>
           <h1>Planification de la journée</h1>
+          <p
+            className="gt-source"
+            role="status"
+            data-source={dataSource ?? "loading"}
+          >
+            {dataSource === "netsuite"
+              ? "Données NetSuite (sandbox)"
+              : dataSource === "demo"
+                ? "Demo"
+                : "Chargement des données"}
+          </p>
         </div>
         <div className="gt-header-actions">
           <button
@@ -946,13 +1033,10 @@ function Workspace() {
         <button
           type="button"
           className="gt-btn-ghost"
-          onClick={() =>
-            setToast(
-              "Prototype — les tournées ne sont pas poussées dans NetSuite.",
-            )
-          }
+          onClick={() => void sendToNetsuite()}
+          disabled={sending || loading}
         >
-          Pousser vers NetSuite
+          {sending ? "Envoi…" : "Envoyer à NetSuite"}
         </button>
         <button
           type="button"
