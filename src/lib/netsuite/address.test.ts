@@ -89,6 +89,41 @@ describe("région", () => {
     assert.equal(deriveRegion({}), "");
   });
 
+  it("retire la ponctuation finale et remet les accents connus", () => {
+    assert.deepEqual(
+      parseAddressText("12 BROADWAY\r\nTILLSONBURG. ON N4G 4G8"),
+      { ville: "Tillsonburg", province: "ON", postal: "N4G 4G8" },
+    );
+    assert.equal(
+      deriveRegion({ ville: "Tillsonburg", province: "ON", postal: "N4G 4G8" }),
+      "Sud-ouest de l'Ontario — N4",
+    );
+    assert.equal(
+      parseAddressText("500 AVENUE BROCHU\r\nSEPT-ILES QC G4S 1A1").ville,
+      "Sept-Îles",
+    );
+    assert.equal(parseAddressText("500 avenue Brochu, Sept-Iles, QC").ville, "Sept-Îles");
+    assert.equal(deriveRegion({ ville: "Sept-Iles" }), "Côte-Nord");
+    assert.equal(deriveRegion({ ville: "Sept-Îles", postal: "G4S 1A1" }), "Côte-Nord");
+    assert.equal(
+      parseAddressText("15 MISSION ROAD\r\nWAWA ON P0S 1K0").ville,
+      "Wawa",
+    );
+    assert.equal(
+      deriveRegion({ ville: "Wawa", province: "ON", postal: "P0S 1K0" }),
+      "Nord de l'Ontario — P0",
+    );
+    assert.equal(
+      parseAddressText("1 MAIN STREET\r\nCORNER BROOK NL A2H 1A1").ville,
+      "Corner Brook",
+    );
+    assert.equal(
+      deriveRegion({ ville: "Corner Brook", province: "NL", postal: "A2H 1A1" }),
+      "Terre-Neuve-et-Labrador",
+    );
+    assert.equal(parseAddressText(SAULT).ville, "Sault Ste. Marie");
+  });
+
   it("ne classe pas Windsor en Ontario dans l'Estrie", () => {
     assert.equal(deriveRegion({ ville: "Windsor" }), "Estrie");
     assert.equal(

@@ -33,6 +33,7 @@ import {
   suggestPlannerFields,
   todayIsoDate,
 } from "@/lib/guertech/suggest-form";
+import { formatDayLabel, formatHoursFr } from "@/lib/guertech/calendar";
 import {
   suggestPreventifs,
   type PreventifSuggestion,
@@ -41,11 +42,65 @@ import type {
   Appel,
   CallType,
   DayStop,
+  PlanStats,
+  RemoteTrip,
   Tech,
   TechRoute,
   Unassigned,
 } from "@/lib/guertech/types";
 import type { OptimizeRouteResponse } from "@/lib/types";
+
+type PlanRouteResponse = {
+  techId: string;
+  stops: DayStop[];
+  totalDriveMin: number;
+  totalDriveKm: number;
+  returnDriveMin: number;
+  returnDriveKm: number;
+  finishMin: number;
+};
+
+type PlanDayResponse = {
+  date: string;
+  routes: PlanRouteResponse[];
+};
+
+type PlanResponse = {
+  days: PlanDayResponse[];
+  unassigned: Unassigned[];
+  remoteTrips: RemoteTrip[];
+  stats: PlanStats;
+  error?: string;
+};
+
+function toTechRoutes(
+  day: PlanDayResponse,
+  techs: Tech[],
+  source: PlanStats["travelSource"],
+): TechRoute[] {
+  const byId = new Map(day.routes.map((route) => [route.techId, route]));
+  return techs
+    .filter((tech) => tech.present)
+    .map((tech) => {
+      const plan = byId.get(tech.id);
+      return {
+        tech,
+        stops: (plan?.stops ?? []).map((stop) => ({
+          ...stop,
+          appel: { ...stop.appel, techId: tech.id },
+        })),
+        google: null,
+        error: null,
+        planDate: day.date,
+        totalDriveMin: plan?.totalDriveMin ?? 0,
+        totalDriveKm: plan?.totalDriveKm ?? 0,
+        returnDriveMin: plan?.returnDriveMin ?? 0,
+        returnDriveKm: plan?.returnDriveKm ?? 0,
+        finishMin: plan?.finishMin,
+        travelSource: source,
+      };
+    });
+}
 
 async function fetchRoute(payload: {
   start: string;
@@ -179,6 +234,30 @@ function Workspace() {
     () => new Set(),
   );
   const [suggestionReady, setSuggestionReady] = useState(false);
+  const [remoteTrips, setRemoteTrips] = useState<RemoteTrip[]>([]);
+  const [planDays, setPlanDays] = useState<Array<{ date: string; routes: TechRoute[] }>>(
+    [],
+  );
+  const [activePlanDate, setActivePlanDate] = useState("");
+  const [planSource, setPlanSource] = useState<"vrp" | "heuristic" | null>(null);
+  const [planStats, setPlanStats] = useState<PlanStats | null>(null);
+  const activeDateRef = useRef("");
+  const horizonRef = useRef<Array<{ date: string; routes: TechRoute[] }>>([]);
+  const planSourceRef = useRef(planSource);
+  useEffect(() => {
+    planSourceRef.current = planSource;
+  }, [planSource]);
+  const commitRoutes = useCallback((next: TechRoute[]) => {
+    setRoutes(next);
+    if (planSourceRef.current !== "vrp") return;
+    const date = activeDateRef.current;
+    if (!date) return;
+    const horizon = horizonRef.current.map((day) =>
+      day.date === date ? { ...day, routes: next } : day,
+    );
+    horizonRef.current = horizon;
+    setPlanDays(horizon);
+  }, []);
   const [refusedSuggestionIds, setRefusedSuggestionIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -264,6 +343,7 @@ function Workspace() {
   );
 
   const preventifSuggestions = useMemo(() => {
+    if (planSource === "vrp") return [];
     if (!displayRoutes.some((route) => route.stops.length > 0)) return [];
     const assignedIds = new Set(
       displayRoutes.flatMap((route) =>
@@ -283,7 +363,7 @@ function Workspace() {
       durations,
       maxPerTech: 6,
     });
-  }, [displayRoutes, calls, durations, refusedSuggestionIds]);
+  }, [displayRoutes, calls, durations, refusedSuggestionIds, planSource]);
 
   const calendarAppelIds = useMemo(() => {
     const ids = new Set<string>();
@@ -327,7 +407,7 @@ function Workspace() {
             return buildTechRoute(route.tech, nextStops);
           }),
         );
-        setRoutes(nextRoutes);
+        commitRoutes(nextRoutes);
         setOvertimeWarnings(evaluateRoadWindow(nextRoutes));
         return;
       }
@@ -378,7 +458,7 @@ function Workspace() {
         nextRoutes = nextRoutes.map((route) =>
           route.tech.id === techId ? rebuilt : route,
         );
-        setRoutes(nextRoutes);
+        commitRoutes(nextRoutes);
         setUnassigned((current) =>
           current.filter((item) => item.appel.id !== appel.id),
         );
@@ -390,7 +470,7 @@ function Workspace() {
         setAcceptingId(null);
       }
     },
-    [routes, emptyRoutes, techs, durations],
+    [routes, emptyRoutes, techs, durations, commitRoutes],
   );
 
   const updateCall = useCallback(
@@ -484,6 +564,7 @@ function Workspace() {
         result.preventifDuration,
       ),
       overtimeAllowed: result.allowOvertime === true,
+      moveAssigned: result.moveAssigned,
       toastPrefix: `Suggestion + tournées : ${result.summary.join(" · ")}`,
     });
   }
@@ -516,7 +597,7 @@ function Workspace() {
         const nextRoutes = (routes ?? []).map((item) =>
           item.tech.id === route.tech.id ? rebuilt : item,
         );
-        setRoutes(nextRoutes);
+        commitRoutes(nextRoutes);
         setUnassigned((current) =>
           current.filter((item) => item.appel.id !== suggestion.appel.id),
         );
@@ -542,7 +623,7 @@ function Workspace() {
         setProgress(null);
       }
     },
-    [routes, acceptingId, overtimeIgnored, allowOvertime],
+    [routes, acceptingId, overtimeIgnored, allowOvertime, commitRoutes],
   );
 
   const acceptAllSuggestions = useCallback(async () => {
@@ -590,7 +671,7 @@ function Workspace() {
         );
       }
 
-      setRoutes(nextRoutes);
+      commitRoutes(nextRoutes);
       setUnassigned((current) =>
         current.filter((item) => !acceptedIds.has(item.appel.id)),
       );
@@ -608,7 +689,7 @@ function Workspace() {
       setAcceptingId(null);
       setProgress(null);
     }
-  }, [routes, acceptingId, preventifSuggestions]);
+  }, [routes, acceptingId, preventifSuggestions, commitRoutes]);
 
   const refuseSuggestion = useCallback((suggestion: PreventifSuggestion) => {
     setRefusedSuggestionIds((current) => {
@@ -657,7 +738,7 @@ function Workspace() {
         const nextRoutes = (routes ?? []).map((item) =>
           item.tech.id === techId ? rebuilt : item,
         );
-        setRoutes(nextRoutes);
+        commitRoutes(nextRoutes);
         setUnassigned((current) => [
           {
             appel: removed.appel,
@@ -687,7 +768,7 @@ function Workspace() {
         setProgress(null);
       }
     },
-    [routes, removingId],
+    [routes, removingId, commitRoutes],
   );
 
   const ignoreOvertimeWarning = useCallback(() => {
@@ -718,7 +799,7 @@ function Workspace() {
           return buildTechRoute(route.tech, route.stops);
         }),
       );
-      setRoutes(rebuilt);
+      commitRoutes(rebuilt);
       if (removedAll.length > 0) {
         setUnassigned((current) => [
           ...removedAll.map((stop) => ({
@@ -739,7 +820,7 @@ function Workspace() {
       setLoading(false);
       setProgress(null);
     }
-  }, [routes]);
+  }, [routes, commitRoutes]);
 
   async function sendToNetsuite() {
     if (sending) return;
@@ -751,7 +832,7 @@ function Workspace() {
         return {
           taskId: stop.appel.id,
           techId: route.tech.id,
-          date: effectiveDate,
+          date: activePlanDate || effectiveDate,
           heure: stop.appel.heure || undefined,
           status: "NOTSTART" as const,
           caseId,
@@ -802,6 +883,7 @@ function Workspace() {
     quota?: number;
     durations?: { preventif: number; reactif: number };
     overtimeAllowed?: boolean;
+    moveAssigned?: boolean;
     toastPrefix?: string;
   }) {
     setError(null);
@@ -856,9 +938,117 @@ function Workspace() {
     }
 
     setLoading(true);
-    setProgress("Optimisation de la journée (fenêtre 8 h–17 h)…");
+    setProgress("Optimisation des tournées (8 h–17 h, 5 jours)…");
+
+    const canMove = options?.moveAssigned ?? moveAssigned === true;
+    const enrichPlanDay = async (date: string, draft: TechRoute[]) => {
+      const enriched = await Promise.all(
+        draft.map(async (route) => {
+          if (route.stops.length === 0) return route;
+          try {
+            const google = await fetchRoute({
+              start: route.tech.start,
+              end: route.tech.end || route.tech.start,
+              stops: route.stops.map((stop) => ({
+                address: stop.appel.adresse,
+                minutesOnSite: stop.minutesOnSite,
+              })),
+              optimize: false,
+              departureTime: new Date().toISOString(),
+            });
+            return { ...route, google, error: null };
+          } catch {
+            return route;
+          }
+        }),
+      );
+      const next = horizonRef.current.map((day) => {
+        if (day.date !== date) return day;
+        return {
+          ...day,
+          routes: day.routes.map((route) => {
+            const update = enriched.find((item) => item.tech.id === route.tech.id);
+            if (!update?.google) return route;
+            const same =
+              route.stops.map((stop) => stop.appel.id).join() ===
+              update.stops.map((stop) => stop.appel.id).join();
+            return same ? { ...route, google: update.google, error: null } : route;
+          }),
+        };
+      });
+      horizonRef.current = next;
+      setPlanDays(next);
+      if (activeDateRef.current === date) {
+        setRoutes(next.find((day) => day.date === date)?.routes ?? draft);
+      }
+    };
 
     try {
+      try {
+        const response = await fetch("/api/dispatch-v2/plan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            calls: callsForDay,
+            techs: readyTechs,
+            date: planDate,
+            horizonDays: 5,
+            pmQuota: quota,
+            durations: dayDurations,
+            allowOvertime: overtimeAllowed,
+            moveAssigned: canMove,
+          }),
+        });
+        if (response.ok) {
+          const plan = (await response.json()) as PlanResponse;
+          const horizon = plan.days.map((day) => ({
+            date: day.date,
+            routes: toTechRoutes(day, readyTechs, plan.stats.travelSource),
+          }));
+          const selected =
+            horizon.find((day) => day.date === planDate) ?? horizon[0];
+          horizonRef.current = horizon;
+          activeDateRef.current = selected?.date ?? "";
+          planSourceRef.current = "vrp";
+          setPlanSource("vrp");
+          setPlanDays(horizon);
+          setActivePlanDate(selected?.date ?? "");
+          setRoutes(selected?.routes ?? []);
+          setUnassigned(plan.unassigned);
+          setRemoteTrips(plan.remoteTrips ?? []);
+          setPlanStats(plan.stats);
+          setOvertimeWarnings([]);
+          setOvertimeIgnored(false);
+          const travelLabel =
+            plan.stats.travelSource === "haversine"
+              ? "temps estimés"
+              : "temps Google";
+          const prefix = options?.toastPrefix ? `${options.toastPrefix} — ` : "";
+          setToast(
+            `${prefix}${plan.stats.served} arrêts sur ${plan.days.length} jour(s), ${formatHoursFr(plan.stats.driveMin)} de route (${travelLabel}). ${plan.stats.remoteCalls} appel(s) en voyage dédié.`,
+          );
+          window.requestAnimationFrame(() => {
+            resultsRef.current?.scrollIntoView({
+              behavior: "smooth",
+              block: "start",
+            });
+          });
+          if (selected && selected.routes.some((route) => route.stops.length > 0)) {
+            void enrichPlanDay(selected.date, selected.routes);
+          }
+          return;
+        }
+      } catch {
+        // L'heuristique historique garde la démo utilisable si l'optimiseur échoue.
+      }
+
+      planSourceRef.current = "heuristic";
+      setPlanSource("heuristic");
+      setRemoteTrips([]);
+      setPlanDays([]);
+      setPlanStats(null);
+      setActivePlanDate("");
+      activeDateRef.current = "";
       const assigned = optimizeDay({
         calls: callsForDay,
         techs: readyTechs,
@@ -1073,6 +1263,28 @@ function Workspace() {
             <RouteBoard
               routes={displayRoutes}
               suggestions={preventifSuggestions}
+              planDays={planDays.map((day) => ({
+                date: day.date,
+                label: formatDayLabel(day.date),
+                stopCount: day.routes.reduce(
+                  (count, route) => count + route.stops.length,
+                  0,
+                ),
+              }))}
+              activeDate={activePlanDate}
+              onSelectDate={(nextDate) => {
+                activeDateRef.current = nextDate;
+                setActivePlanDate(nextDate);
+                const day = horizonRef.current.find((item) => item.date === nextDate);
+                if (day) setRoutes(day.routes);
+              }}
+              unassigned={unassigned}
+              remoteTrips={remoteTrips}
+              planSummary={
+                planStats
+                  ? `${planStats.served} arrêts tenus avant 17 h · ${formatHoursFr(planStats.driveMin)} de route · ${planStats.remoteCalls} appel(s) en voyage dédié`
+                  : undefined
+              }
               onAcceptSuggestion={acceptSuggestion}
               onRefuseSuggestion={refuseSuggestion}
               onAcceptAllSuggestions={acceptAllSuggestions}
@@ -1157,7 +1369,7 @@ function Workspace() {
               <input
                 type="number"
                 min={0}
-                max={40}
+                max={80}
                 value={pmQuota}
                 placeholder={`ex. ${Math.ceil(avgPreventifPerDay)} (ratio Q4)`}
                 onChange={(event) => setPmQuota(event.target.value)}

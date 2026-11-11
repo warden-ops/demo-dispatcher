@@ -42,6 +42,12 @@ export type DayStop = {
   appel: Appel;
   minutesOnSite: number;
   pinned: boolean;
+  /** Pourquoi l'optimiseur a choisi cet arrêt. */
+  reason?: string;
+  driveMin?: number;
+  driveKm?: number;
+  arriveMin?: number;
+  leaveMin?: number;
 };
 
 export type TechRoute = {
@@ -49,4 +55,45 @@ export type TechRoute = {
   stops: DayStop[];
   google: import("@/lib/types").OptimizeRouteResponse | null;
   error: string | null;
+  planDate?: string;
+  totalDriveMin?: number;
+  totalDriveKm?: number;
+  returnDriveMin?: number;
+  returnDriveKm?: number;
+  finishMin?: number;
+  travelSource?: "haversine" | "google" | "mixed";
+};
+
+export type RemoteTripCall = {
+  appel: Appel;
+  minutesOnSite: number;
+  reason: string;
+};
+
+/** Appels trop loin pour un aller-retour 8 h–17 h, groupés par secteur. */
+export type RemoteTrip = {
+  id: string;
+  area: string;
+  kind: "nuitée" | "trajet dédié";
+  reason: string;
+  calls: RemoteTripCall[];
+  localDriveMin: number;
+  localDriveKm: number;
+  depotOneWayMin: number;
+  depotOneWayKm: number;
+  onSiteDays: number;
+};
+
+export type PlanStats = {
+  driveMin: number;
+  driveKm: number;
+  served: number;
+  reactivesServed: number;
+  reactives: number;
+  slaMisses: number;
+  remoteCalls: number;
+  elapsedMs: number;
+  travelMs: number;
+  travelSource: "haversine" | "google" | "mixed";
+  overtimeRoutes: number;
 };

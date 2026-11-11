@@ -63,8 +63,10 @@ function formatMin(total: number): string {
 function travelMinutesForLeg(route: TechRoute, stopIndex: number): number {
   const leg = route.google?.legs?.[stopIndex];
   if (leg && Number.isFinite(leg.durationSeconds) && leg.durationSeconds > 0) {
-    return Math.max(5, Math.round(leg.durationSeconds / 60));
+    return Math.max(1, Math.round(leg.durationSeconds / 60));
   }
+  const estimated = route.stops[stopIndex]?.driveMin;
+  if (estimated != null && estimated >= 0) return Math.round(estimated);
   return DEFAULT_TRAVEL_MIN;
 }
 
@@ -86,7 +88,9 @@ function buildTimeline(
         minutes: driveMin,
         label: route.google?.legs?.[index]?.durationText
           ? `Trajet ${route.google.legs[index].durationText}`
-          : `Trajet ~${driveMin} min`,
+          : route.stops[index]?.driveKm
+            ? `Trajet ${driveMin} min · ${route.stops[index].driveKm} km`
+            : `Trajet ~${driveMin} min`,
       });
       cursor += driveMin;
     }
@@ -112,15 +116,23 @@ function buildTimeline(
   });
 
   const returnLeg = route.google?.legs?.[route.stops.length];
-  if (returnLeg && returnLeg.durationSeconds > 0) {
-    const minutes = Math.max(5, Math.round(returnLeg.durationSeconds / 60));
+  const returnMin =
+    returnLeg && returnLeg.durationSeconds > 0
+      ? Math.max(1, Math.round(returnLeg.durationSeconds / 60))
+      : route.returnDriveMin != null && route.returnDriveMin > 0
+        ? Math.round(route.returnDriveMin)
+        : 0;
+  if (returnMin > 0) {
+    const returnKm = route.returnDriveKm ? ` · ${route.returnDriveKm} km` : "";
     items.push({
       kind: "travel",
       key: `travel-return-${route.tech.id}`,
       startMin: cursor,
-      endMin: cursor + minutes,
-      minutes,
-      label: `Retour dépôt · ${returnLeg.durationText}`,
+      endMin: cursor + returnMin,
+      minutes: returnMin,
+      label: returnLeg?.durationText
+        ? `Retour dépôt · ${returnLeg.durationText}`
+        : `Retour dépôt · ${returnMin} min${returnKm}`,
     });
   }
 
@@ -259,7 +271,11 @@ export function ScheduleCalendar({
                     {techSuggestions.length
                       ? ` · ${techSuggestions.length} suggestion(s)`
                       : ""}
-                    {route.google ? " · trafic Google" : " · estimé"}
+                    {route.totalDriveMin
+                      ? ` · ${route.totalDriveMin} min · ${route.totalDriveKm ?? 0} km`
+                      : route.google
+                        ? " · trafic Google"
+                        : " · estimé"}
                   </span>
                 </button>
                 <div className="gt-cal-day">
@@ -350,7 +366,7 @@ export function ScheduleCalendar({
                           top: `${topPct(item.startMin)}%`,
                           height: `${Math.max(5.5, heightPct(item.startMin, item.endMin))}%`,
                         }}
-                        title={`${item.arriveLabel}–${item.leaveLabel} · ${item.stop.appel.magasin}`}
+                        title={`${item.arriveLabel}–${item.leaveLabel} · ${item.stop.appel.magasin}${item.stop.reason ? ` · ${item.stop.reason}` : ""}`}
                       >
                         <button
                           type="button"
@@ -373,10 +389,8 @@ export function ScheduleCalendar({
                           {item.index + 1}. {item.stop.appel.magasin}
                         </span>
                         <span className="gt-cal-event-meta">
-                          {item.stop.appel.type === "preventif"
-                            ? "Préventif"
-                            : "Réactif"}{" "}
-                          · {item.stop.minutesOnSite} min sur place
+                          {item.stop.reason ||
+                            `${item.stop.appel.type === "preventif" ? "Préventif" : "Réactif"} · ${item.stop.minutesOnSite} min sur place`}
                         </span>
                       </div>
                     );
