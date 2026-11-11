@@ -421,9 +421,30 @@ export function RouteBoard({
       {unassigned.length > 0 ? (
         <div className="gt-unassigned">
           <h3>Non assignés ({unassigned.length})</h3>
+          {unassigned.some((item) => item.reason.startsWith("Adresse à valider")) ? (
+            <div className="gt-validate">
+              <strong>Adresse à valider</strong>
+              <ul>
+                {unassigned
+                  .filter((item) => item.reason.startsWith("Adresse à valider"))
+                  .map((item) => (
+                    <li key={item.appel.id}>
+                      <strong>{item.appel.magasin}</strong>
+                      <span>
+                        Adresse à valider — {item.appel.adresse || "aucune adresse"}
+                      </span>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          ) : null}
           <ul>
             {unassigned
-              .filter((item) => item.appel.type === "reactif" || item.appel.planifie)
+              .filter(
+                (item) =>
+                  !item.reason.startsWith("Adresse à valider") &&
+                  (item.appel.type === "reactif" || item.appel.planifie),
+              )
               .slice(0, 12)
               .map((item) => (
                 <li key={item.appel.id}>
@@ -432,12 +453,19 @@ export function RouteBoard({
                 </li>
               ))}
           </ul>
-          {unassigned.filter((item) => item.appel.type === "preventif" && !item.appel.planifie)
-            .length > 0 ? (
+          {unassigned.filter(
+            (item) =>
+              item.appel.type === "preventif" &&
+              !item.appel.planifie &&
+              !item.reason.startsWith("Adresse à valider"),
+          ).length > 0 ? (
             <p>
               {
                 unassigned.filter(
-                  (item) => item.appel.type === "preventif" && !item.appel.planifie,
+                  (item) =>
+                    item.appel.type === "preventif" &&
+                    !item.appel.planifie &&
+                    !item.reason.startsWith("Adresse à valider"),
                 ).length
               }{" "}
               préventif(s) restent hors tournée (quota du jour ou journée déjà pleine).

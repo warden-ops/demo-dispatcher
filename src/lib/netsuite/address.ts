@@ -281,16 +281,17 @@ function splitCityProvince(text: string): { ville: string; province: string } {
   const cleaned = text.replace(/,/g, " ").replace(/\s+/g, " ").trim();
   if (!cleaned) return { ville: "", province: "" };
   const tokens = cleaned.split(" ").filter(Boolean);
-  const found = provinceFromTokens(tokens);
-  const cityTokens = (found.consumed > 0
-    ? tokens.slice(0, -found.consumed)
-    : tokens
-  )
-    .map(cleanCityToken)
-    .filter(Boolean);
+  let province = "";
+  const cityTokens = [...tokens];
+  while (cityTokens.length > 0) {
+    const found = provinceFromTokens(cityTokens);
+    if (!found.province || found.consumed <= 0) break;
+    if (!province) province = found.province;
+    cityTokens.splice(cityTokens.length - found.consumed, found.consumed);
+  }
   return {
-    ville: formatPlaceName(cityTokens.join(" ")),
-    province: found.province,
+    ville: formatPlaceName(cityTokens.map(cleanCityToken).filter(Boolean).join(" ")),
+    province,
   };
 }
 
