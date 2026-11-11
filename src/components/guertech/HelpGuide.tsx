@@ -9,7 +9,7 @@ const STEPS = [
   },
   {
     title: "Générer une suggestion",
-    body: "Remplit les champs vides et construit tout de suite les tournées dans le calendrier (urgence d’abord, trajets Google).",
+    body: "Construit les tournées sur 5 jours ouvrables : réactifs selon le délai de 2 jours, puis préventifs proches. Les appels trop loin pour revenir à Drummondville avant 17 h sont groupés à part.",
   },
   {
     title: "Appels planifiés",
@@ -17,7 +17,7 @@ const STEPS = [
   },
   {
     title: "Calendrier",
-    body: "Rouge = réactif, jaune = préventif, hachuré = trajet. Accepter ou Refuser les suggestions (une par une ou toutes).",
+    body: "Rouge = réactif, jaune = préventif, hachuré = trajet. Retirez un arrêt pour modifier. Rien n'est écrit dans NetSuite tant que vous n'envoyez pas.",
   },
   {
     title: "Fenêtre 8 h–17 h",

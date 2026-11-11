@@ -112,24 +112,13 @@ export function suggestPlannerFields(options: {
   }
 
   const ratio = preventifPerBusinessDay(date);
-  // Pack denser days: enough PM slots for present techs, not just the Q4 daily average.
   const regionCount = new Set(
     options.calls
       .filter((c) => c.type === "reactif" && c.region.trim())
       .map((c) => c.region),
   ).size;
-  const packTarget = Math.max(
-    Math.ceil(ratio),
-    Math.max(4, regionCount) * 3,
-  );
-  const pmQuota = isBlank(options.inputs.pmQuota)
-    ? String(packTarget)
-    : options.inputs.pmQuota;
-  if (isBlank(options.inputs.pmQuota)) {
-    summary.push(
-      `Quota préventif → ${pmQuota} (pack dense; ratio Q4 ≈ ${ratio}/jour)`,
-    );
-  }
+  const quotaWasBlank = isBlank(options.inputs.pmQuota);
+  let pmQuota = options.inputs.pmQuota;
 
   const reactifDuration = isBlank(options.inputs.reactifDuration)
     ? String(DEFAULT_DURATIONS.reactif)
@@ -230,21 +219,35 @@ export function suggestPlannerFields(options: {
   }
 
   let staffedWithoutZone = false;
-  if (!techs.some((tech) => tech.present)) {
-    let slots = Math.min(4, techs.length);
+  const anyZone = techs.some((tech) => tech.region.trim());
+  if (!anyZone && !techs.some((tech) => tech.present)) {
     for (const tech of techs) {
-      if (slots <= 0) break;
       if (options.presenceTouched.has(tech.id)) continue;
       tech.present = true;
-      slots -= 1;
       staffedWithoutZone = true;
     }
+  }
+
+  if (quotaWasBlank) {
+    const presentCount = Math.max(
+      1,
+      techs.filter((tech) => tech.present).length,
+    );
+    const packTarget = Math.max(
+      Math.ceil(ratio),
+      Math.max(4, regionCount) * 3,
+      presentCount * 3,
+    );
+    pmQuota = String(Math.min(80, packTarget));
+    summary.push(
+      `Quota préventif → ${pmQuota} (${presentCount} technicien(s), ratio Q4 ≈ ${ratio}/jour)`,
+    );
   }
 
   const newlyPresent = techs.filter((t) => t.present).map((t) => t.name);
   if (staffedWithoutZone) {
     summary.push(
-      "Aucune zone technicien : les premiers techniciens sont marqués présents",
+      "Aucune zone technicien : tous les techniciens sont marqués présents (répartition par temps de route)",
     );
   }
   if (newlyPresent.length) {

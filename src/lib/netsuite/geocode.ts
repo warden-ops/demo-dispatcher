@@ -1,3 +1,5 @@
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
 import type { Appel } from "../guertech/types";
 import type { EnvMap } from "./config";
 import { readEnvValue } from "./config";
@@ -15,9 +17,51 @@ type CacheEntry = {
 };
 
 const cache = new Map<string, CacheEntry>();
+let loadedFrom = "";
+let diskDirty = false;
 
 export function clearGeocodeCache(): void {
   cache.clear();
+  loadedFrom = "";
+  diskDirty = false;
+}
+
+function diskFile(env: EnvMap): string | null {
+  if (readEnvValue(env, "GEOCODE_CACHE_DISABLE") === "1") return null;
+  const configured = readEnvValue(env, "GEOCODE_CACHE_PATH");
+  if (configured) return configured;
+  if (process.env.NODE_TEST_CONTEXT) return null;
+  return path.join(process.cwd(), ".cache", "geocode.json");
+}
+
+async function ensureDisk(env: EnvMap, now: number): Promise<void> {
+  const file = diskFile(env);
+  if (!file || loadedFrom === file) return;
+  loadedFrom = file;
+  try {
+    const raw = await readFile(file, "utf8");
+    const parsed = JSON.parse(raw) as { entries?: Record<string, CacheEntry> };
+    for (const [key, entry] of Object.entries(parsed.entries ?? {})) {
+      if (!entry || entry.expiresAt <= now) continue;
+      cache.set(key, entry);
+    }
+  } catch {
+    // fichier absent ou illisible : on recommence en mémoire
+  }
+}
+
+async function persistDisk(env: EnvMap): Promise<void> {
+  const file = diskFile(env);
+  if (!file || !diskDirty) return;
+  const entries: Record<string, CacheEntry> = {};
+  for (const [key, entry] of cache) entries[key] = entry;
+  try {
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, JSON.stringify({ entries }), "utf8");
+    diskDirty = false;
+  } catch {
+    // le cache mémoire reste valide pour la requête en cours
+  }
 }
 
 function mapsKey(env: EnvMap): string {
@@ -59,6 +103,7 @@ function writeHit(
     lng: point?.lng ?? null,
     expiresAt: now + (point ? POSITIVE_TTL_MS : NEGATIVE_TTL_MS),
   });
+  diskDirty = true;
 }
 
 async function lookup(
@@ -106,8 +151,12 @@ export async function geocodeAppels(
   env: EnvMap,
   fetchImpl: typeof fetch = fetch,
   now = Date.now(),
+  limits?: { maxLookups?: number; budgetMs?: number },
 ): Promise<Appel[]> {
+  await ensureDisk(env, now);
   const apiKey = mapsKey(env);
+  const maxLookups = limits?.maxLookups ?? MAX_LOOKUPS;
+  const budgetMs = limits?.budgetMs ?? REQUEST_BUDGET_MS;
   const resolved = new Map<string, { lat: number; lng: number } | null>();
   const needsLookup: string[] = [];
   const seen = new Set<string>();
@@ -128,12 +177,12 @@ export async function geocodeAppels(
   }
 
   if (apiKey && needsLookup.length > 0) {
-    const deadline = Date.now() + REQUEST_BUDGET_MS;
+    const deadline = Date.now() + budgetMs;
     let lookedUp = 0;
     for (
       let index = 0;
       index < needsLookup.length &&
-      lookedUp < MAX_LOOKUPS &&
+      lookedUp < maxLookups &&
       Date.now() < deadline;
       index += CONCURRENCY
     ) {
@@ -148,6 +197,7 @@ export async function geocodeAppels(
       });
       lookedUp += batch.length;
     }
+    await persistDisk(env);
   }
 
   return appels.map((appel) => {

@@ -1137,6 +1137,94 @@
   }
 }
 
+.gt-day-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0 0 0.75rem;
+}
+
+.gt-day-tabs button span {
+  display: block;
+  font-size: 0.72rem;
+  opacity: 0.75;
+}
+
+.gt-remote,
+.gt-unassigned {
+  margin-top: 1.1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--gt-line);
+}
+
+.gt-remote h3,
+.gt-unassigned h3 {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+}
+
+.gt-remote > p,
+.gt-unassigned > p {
+  margin: 0.2rem 0 0;
+  color: var(--gt-muted);
+  font-size: 0.88rem;
+}
+
+.gt-remote-card {
+  margin-top: 0.7rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--gt-line);
+  border-left: 3px solid var(--gt-navy);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.gt-remote-card header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.35rem 1rem;
+}
+
+.gt-remote-card header span,
+.gt-remote-card li em {
+  color: var(--gt-muted);
+  font-style: normal;
+  font-size: 0.82rem;
+}
+
+.gt-remote-card ol {
+  margin: 0.45rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.gt-remote-card li {
+  margin: 0.35rem 0;
+}
+
+.gt-remote-card li em {
+  display: block;
+}
+
+.gt-unassigned ul {
+  list-style: none;
+  margin: 0.45rem 0 0;
+  padding: 0;
+}
+
+.gt-unassigned li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--gt-line);
+}
+
+.gt-unassigned li span {
+  color: var(--gt-muted);
+  font-size: 0.85rem;
+}
+
 @media (max-width: 900px) {
   .gt-grid,
   .gt-stats {

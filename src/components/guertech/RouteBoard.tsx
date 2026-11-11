@@ -3,11 +3,12 @@
 import { useState } from "react";
 import { RouteMap } from "@/components/RouteMap";
 import { ScheduleCalendar } from "@/components/guertech/ScheduleCalendar";
+import { formatHoursFr, formatKmFr } from "@/lib/guertech/calendar";
 import { DRUMMONDVILLE_CENTER } from "@/lib/guertech/constants";
 import { ROAD_WINDOW } from "@/lib/guertech/optimize";
 import type { OvertimeWarning } from "@/lib/guertech/optimize";
 import type { PreventifSuggestion } from "@/lib/guertech/suggestions";
-import type { TechRoute } from "@/lib/guertech/types";
+import type { RemoteTrip, TechRoute, Unassigned } from "@/lib/guertech/types";
 import {
   buildGoogleMapsRouteUrl,
   buildRouteShareText,
@@ -29,6 +30,12 @@ type RouteBoardProps = {
   removingId?: string | null;
   onOpenTechPanel?: () => void;
   emptyHint?: string;
+  planDays?: Array<{ date: string; label: string; stopCount: number }>;
+  activeDate?: string;
+  onSelectDate?: (date: string) => void;
+  unassigned?: Unassigned[];
+  remoteTrips?: RemoteTrip[];
+  planSummary?: string;
 };
 
 export function RouteBoard({
@@ -47,6 +54,12 @@ export function RouteBoard({
   removingId = null,
   onOpenTechPanel,
   emptyHint,
+  planDays = [],
+  activeDate = "",
+  onSelectDate,
+  unassigned = [],
+  remoteTrips = [],
+  planSummary,
 }: RouteBoardProps) {
   const withWork = routes.filter((route) => route.stops.length > 0);
   const [techId, setTechId] = useState(routes[0]?.tech.id ?? "");
@@ -190,6 +203,25 @@ export function RouteBoard({
         </p>
       ) : null}
 
+      {planDays.length > 1 ? (
+        <div className="gt-day-tabs" role="tablist" aria-label="Jours de la proposition">
+          {planDays.map((day) => (
+            <button
+              key={day.date}
+              type="button"
+              role="tab"
+              aria-selected={day.date === activeDate}
+              className={day.date === activeDate ? "gt-btn" : "gt-btn-ghost"}
+              onClick={() => onSelectDate?.(day.date)}
+            >
+              {day.label}
+              <span>{day.stopCount}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {planSummary ? <p className="gt-share-hint">{planSummary}</p> : null}
+
       {view === "calendar" ? (
         <>
           {emptyHint && withWork.length === 0 ? (
@@ -318,6 +350,7 @@ export function RouteBoard({
                     </span>
                     {stop.appel.adresse}
                     {stop.pinned ? ` · ${stop.appel.heure}` : ""}
+                    {stop.reason ? ` · ${stop.reason}` : ""}
                     {current.google?.optimizedStopDetails[index]
                       ? ` · ${current.google.optimizedStopDetails[index].arriveLabel}–${current.google.optimizedStopDetails[index].leaveLabel}`
                       : ""}
@@ -327,6 +360,11 @@ export function RouteBoard({
                       Trajet vers cet arrêt :{" "}
                       {current.google.legs[index].durationText} ·{" "}
                       {current.google.legs[index].distanceText}
+                    </p>
+                  ) : stop.driveMin != null ? (
+                    <p className="optimized-leg">
+                      Trajet vers cet arrêt : {stop.driveMin} min ·{" "}
+                      {formatKmFr(stop.driveKm ?? 0)}
                     </p>
                   ) : null}
                 </div>
@@ -340,6 +378,73 @@ export function RouteBoard({
           />
         </>
       )}
+
+      {remoteTrips.length > 0 ? (
+        <div className="gt-remote">
+          <h3>Voyages dédiés</h3>
+          <p>
+            Ces appels ne rentrent pas dans un aller-retour entre 8 h et 17 h
+            depuis Drummondville. Ils sont groupés par secteur et ne sont pas
+            posés au calendrier.
+          </p>
+          {remoteTrips.map((trip) => (
+            <article key={trip.id} className="gt-remote-card">
+              <header>
+                <strong>
+                  {trip.kind === "nuitée" ? "Nuitée" : "Trajet dédié"} · {trip.area}
+                </strong>
+                <span>
+                  {trip.calls.length} appel{trip.calls.length > 1 ? "s" : ""} · aller{" "}
+                  {formatHoursFr(trip.depotOneWayMin)}
+                  {trip.localDriveMin > 0
+                    ? ` · ${formatHoursFr(trip.localDriveMin)} entre les arrêts`
+                    : ""}
+                </span>
+              </header>
+              <p>{trip.reason}</p>
+              <ol>
+                {trip.calls.map((stop) => (
+                  <li key={stop.appel.id}>
+                    <span className={`gt-tag ${stop.appel.type}`}>
+                      {stop.appel.type === "preventif" ? "Préventif" : "Réactif"}
+                    </span>{" "}
+                    {stop.appel.magasin}
+                    <em>{stop.reason}</em>
+                  </li>
+                ))}
+              </ol>
+            </article>
+          ))}
+        </div>
+      ) : null}
+
+      {unassigned.length > 0 ? (
+        <div className="gt-unassigned">
+          <h3>Non assignés ({unassigned.length})</h3>
+          <ul>
+            {unassigned
+              .filter((item) => item.appel.type === "reactif" || item.appel.planifie)
+              .slice(0, 12)
+              .map((item) => (
+                <li key={item.appel.id}>
+                  <strong>{item.appel.magasin}</strong>
+                  <span>{item.reason}</span>
+                </li>
+              ))}
+          </ul>
+          {unassigned.filter((item) => item.appel.type === "preventif" && !item.appel.planifie)
+            .length > 0 ? (
+            <p>
+              {
+                unassigned.filter(
+                  (item) => item.appel.type === "preventif" && !item.appel.planifie,
+                ).length
+              }{" "}
+              préventif(s) restent hors tournée (quota du jour ou journée déjà pleine).
+            </p>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 }

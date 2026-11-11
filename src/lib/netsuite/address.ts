@@ -99,6 +99,23 @@ const CITY_REGION: Record<string, string> = {
   montreal: "Montréal",
   toronto: "Toronto",
   "sault sainte marie": "Nord de l'Ontario — P6",
+  "sept-iles": "Côte-Nord",
+  "sept iles": "Côte-Nord",
+  wawa: "Nord de l'Ontario — P0",
+  tillsonburg: "Sud-ouest de l'Ontario — N4",
+  "corner brook": "Terre-Neuve-et-Labrador",
+};
+
+/**
+ * Affichage des villes connues. « Sept-Iles » et « SEPT-ILES » deviennent
+ * « Sept-Îles ». Une ville inconnue garde le texte, sans accent inventé.
+ */
+const CANONICAL_PLACE: Record<string, string> = {
+  becancour: "Bécancour",
+  montreal: "Montréal",
+  "trois rivieres": "Trois-Rivières",
+  "sept iles": "Sept-Îles",
+  "val des sources": "Val-des-Sources",
 };
 
 /** FSA (3 caractères) dont la région technicien est sûre. */
@@ -210,17 +227,33 @@ export function normalizeProvince(value: string): string {
   return PROVINCE_NAMES[foldPlace(trimmed)] ?? "";
 }
 
+function canonicalPlace(value: string): string {
+  const spaced = foldPlace(value)
+    .replace(/\./g, "")
+    .replace(/-/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return CANONICAL_PLACE[spaced] ?? "";
+}
+
+/** Enlève la ponctuation finale (« Tillsonburg. ») sans toucher à « Ste. ». */
+function cleanCityToken(token: string): string {
+  if (/^(st|ste)\.?$/i.test(token)) return token;
+  return token.replace(/^[.,;:]+|[.,;:]+$/g, "");
+}
+
 export function formatPlaceName(value: string): string {
   const trimmed = value.replace(/\s+/g, " ").trim();
   if (!trimmed) return "";
+  const known = canonicalPlace(trimmed);
+  if (known) return known;
   const letters = trimmed.replace(/[^\p{L}]/gu, "");
   if (!letters || letters !== letters.toUpperCase()) return trimmed;
-  return trimmed
-    .toLowerCase()
-    .replace(
-      /(^|[\s\-'/])(\p{L})/gu,
-      (_match, sep: string, char: string) => sep + char.toUpperCase(),
-    );
+  const titled = trimmed.toLowerCase().replace(
+    /(^|[\s\-'/])(\p{L})/gu,
+    (_match, sep: string, char: string) => sep + char.toUpperCase(),
+  );
+  return canonicalPlace(titled) || titled;
 }
 
 function extractPostal(text: string): string {
@@ -249,8 +282,12 @@ function splitCityProvince(text: string): { ville: string; province: string } {
   if (!cleaned) return { ville: "", province: "" };
   const tokens = cleaned.split(" ").filter(Boolean);
   const found = provinceFromTokens(tokens);
-  const cityTokens =
-    found.consumed > 0 ? tokens.slice(0, -found.consumed) : tokens;
+  const cityTokens = (found.consumed > 0
+    ? tokens.slice(0, -found.consumed)
+    : tokens
+  )
+    .map(cleanCityToken)
+    .filter(Boolean);
   return {
     ville: formatPlaceName(cityTokens.join(" ")),
     province: found.province,

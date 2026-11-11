@@ -174,7 +174,7 @@ describe("suggestion de présence sans zone technicien", () => {
     });
     assert.deepEqual(
       result.techs.filter((item) => item.present).map((item) => item.id),
-      ["1", "2", "3", "4"],
+      ["1", "2", "3", "4", "5"],
     );
   });
 

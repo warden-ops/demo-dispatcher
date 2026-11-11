@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start -H 127.0.0.1 -p 3010",
     "lint": "eslint",
-    "test": "node --require ./scripts/stub-server-only.cjs --import tsx --test src/lib/netsuite/*.test.ts src/lib/guertech/*.test.ts"
+    "test": "node --require ./scripts/stub-server-only.cjs --import tsx --test src/lib/netsuite/*.test.ts src/lib/guertech/*.test.ts",
+    "benchmark": "node --require ./scripts/stub-server-only.cjs --import tsx scripts/benchmark-vrp.ts"
   },
   "dependencies": {
     "@googlemaps/polyline-codec": "^1.0.28",

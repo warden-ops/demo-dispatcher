@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import type { Appel } from "../guertech/types";
 import { clearGeocodeCache, geocodeAppels } from "./geocode";
@@ -86,5 +89,33 @@ describe("géocodage", () => {
     );
     assert.equal(called, 0);
     assert.equal(result[0]?.lat, 45.5);
+  });
+
+  it("relit le cache disque après un redémarrage", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "geocode-"));
+    const file = path.join(directory, "geocode.json");
+    const env = {
+      GOOGLE_MAPS_SERVER_API_KEY: "test-key",
+      GEOCODE_CACHE_PATH: file,
+    };
+    const fetchImpl: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          status: "OK",
+          results: [{ geometry: { location: { lat: 46.51, lng: -84.33 } } }],
+        }),
+        { status: 200 },
+      );
+    await geocodeAppels([appel("1", ADDRESS)], env, fetchImpl);
+    clearGeocodeCache();
+    let called = 0;
+    const again = await geocodeAppels([appel("2", ADDRESS)], env, async () => {
+      called += 1;
+      throw new Error("processus relancé");
+    });
+    assert.equal(called, 0);
+    assert.equal(again[0]?.lat, 46.51);
+    assert.equal(again[0]?.lng, -84.33);
+    await rm(directory, { recursive: true, force: true });
   });
 });
