@@ -1,5 +1,6 @@
 import { onSiteMinutes, parseMinutes } from "./assign";
 import { DEFAULT_DURATIONS } from "./constants";
+import { compareScoreThenDistance, nearestStopKm } from "./geo";
 import { ROAD_WINDOW } from "./optimize";
 import type { Appel, DayStop, TechRoute } from "./types";
 
@@ -123,6 +124,10 @@ function normalizeClientKey(appel: Pick<Appel, "adresse" | "magasin">): string {
   return `${appel.adresse.trim().toLowerCase()}|${appel.magasin.trim().toLowerCase()}`;
 }
 
+function placeKey(value: string): string {
+  return value.trim().toLocaleLowerCase("fr-CA");
+}
+
 function scoreCandidate(
   route: TechRoute,
   appel: Appel,
@@ -155,17 +160,24 @@ function scoreCandidate(
     };
   }
 
-  const villes = new Set(route.stops.map((s) => s.appel.ville));
-  const regions = new Set(route.stops.map((s) => s.appel.region));
+  const villes = new Set(
+    route.stops.map((stop) => placeKey(stop.appel.ville)).filter(Boolean),
+  );
+  const regions = new Set(
+    route.stops.map((stop) => placeKey(stop.appel.region)).filter(Boolean),
+  );
 
-  if (villes.has(appel.ville)) {
+  if (appel.ville && villes.has(placeKey(appel.ville))) {
     return {
       score: 5,
       reason: `Même ville qu'un arrêt (${appel.ville})`,
       afterStopIndex: null,
     };
   }
-  if (regions.has(appel.region) || appel.region === route.tech.region) {
+  if (
+    (appel.region && regions.has(placeKey(appel.region))) ||
+    (appel.region && placeKey(appel.region) === placeKey(route.tech.region))
+  ) {
     return {
       score: 3,
       reason: `Même région (${appel.region})`,
@@ -208,7 +220,24 @@ export function suggestPreventifs(options: {
       .filter((appel) => appel.type === "preventif" && !appel.planifie)
       .map((appel) => ({ appel, ...scoreCandidate(route, appel) }))
       .filter((item) => item.score > 0 && !used.has(item.appel.id))
-      .sort((a, b) => b.score - a.score);
+      .sort((a, b) =>
+        compareScoreThenDistance(
+          {
+            score: a.score,
+            distanceKm: nearestStopKm(
+              a.appel,
+              route.stops.map((stop) => stop.appel),
+            ),
+          },
+          {
+            score: b.score,
+            distanceKm: nearestStopKm(
+              b.appel,
+              route.stops.map((stop) => stop.appel),
+            ),
+          },
+        ),
+      );
 
     for (const gap of orderedGaps) {
       if (added >= maxPerTech) break;

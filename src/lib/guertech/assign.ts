@@ -1,4 +1,5 @@
 import { DEFAULT_DURATIONS, isReactifOverdue } from "./constants";
+import { compareScoreThenDistance, nearestStopKm } from "./geo";
 import type { Appel, DayStop, Tech, Unassigned } from "./types";
 
 export function parseMinutes(hhmm: string): number {
@@ -30,15 +31,22 @@ function pickTech(
   if (eligible.length === 0) return null;
 
   const scored = eligible.map((tech) => {
-    const sameRegion = tech.region === appel.region ? 2 : 0;
+    const sameRegion = appel.region && tech.region === appel.region ? 2 : 0;
     const deuxPourUn =
       appel.type === "preventif" &&
       assigned[tech.id].some((stop) => stop.appel.type === "reactif")
         ? 3
         : 0;
-    return { tech, score: sameRegion + deuxPourUn + capacity[tech.id] / 100 };
+    return {
+      tech,
+      score: sameRegion + deuxPourUn + capacity[tech.id] / 100,
+      distanceKm: nearestStopKm(
+        appel,
+        assigned[tech.id].map((stop) => stop.appel),
+      ),
+    };
   });
-  scored.sort((a, b) => b.score - a.score);
+  scored.sort(compareScoreThenDistance);
   return scored[0].tech;
 }
 
@@ -58,7 +66,9 @@ export function assignDay(options: {
 }): { byTech: Record<string, DayStop[]>; unassigned: Unassigned[] } {
   const durations = options.durations ?? DEFAULT_DURATIONS;
   const present = options.techs.filter((tech) => tech.present);
-  const regions = new Set(present.map((tech) => tech.region));
+  const regions = new Set(
+    present.map((tech) => tech.region.trim()).filter(Boolean),
+  );
   const byTech: Record<string, DayStop[]> = Object.fromEntries(
     present.map((tech) => [tech.id, [] as DayStop[]]),
   );

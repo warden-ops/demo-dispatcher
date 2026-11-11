@@ -7,6 +7,9 @@ export type Appel = {
   adresse: string;
   ville: string;
   region: string;
+  /** Rempli par NetSuite ou par le géocodage serveur. Absent en mode démo. */
+  lat?: number;
+  lng?: number;
   equipement: string;
   equipementId: number;
   netsuiteId: string;

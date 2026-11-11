@@ -114,7 +114,9 @@ export function suggestPlannerFields(options: {
   const ratio = preventifPerBusinessDay(date);
   // Pack denser days: enough PM slots for present techs, not just the Q4 daily average.
   const regionCount = new Set(
-    options.calls.filter((c) => c.type === "reactif").map((c) => c.region),
+    options.calls
+      .filter((c) => c.type === "reactif" && c.region.trim())
+      .map((c) => c.region),
   ).size;
   const packTarget = Math.max(
     Math.ceil(ratio),
@@ -162,7 +164,7 @@ export function suggestPlannerFields(options: {
   const pending = reactifs.filter((c) => !isReactifOverdue(c, date));
   const neededRegions = new Set<string>();
   for (const appel of [...overdue, ...pending]) {
-    neededRegions.add(appel.region);
+    if (appel.region.trim()) neededRegions.add(appel.region);
   }
   // Always cover HQ region for demo density
   neededRegions.add("Centre-du-Québec");
@@ -227,7 +229,24 @@ export function suggestPlannerFields(options: {
     }
   }
 
+  let staffedWithoutZone = false;
+  if (!techs.some((tech) => tech.present)) {
+    let slots = Math.min(4, techs.length);
+    for (const tech of techs) {
+      if (slots <= 0) break;
+      if (options.presenceTouched.has(tech.id)) continue;
+      tech.present = true;
+      slots -= 1;
+      staffedWithoutZone = true;
+    }
+  }
+
   const newlyPresent = techs.filter((t) => t.present).map((t) => t.name);
+  if (staffedWithoutZone) {
+    summary.push(
+      "Aucune zone technicien : les premiers techniciens sont marqués présents",
+    );
+  }
   if (newlyPresent.length) {
     summary.push(`Techs présents → ${newlyPresent.join(", ")}`);
   }
