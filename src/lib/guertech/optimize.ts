@@ -1,5 +1,6 @@
 import { parseMinutes, onSiteMinutes } from "./assign";
 import { DEFAULT_DURATIONS, isReactifOverdue } from "./constants";
+import { compareScoreThenDistance, nearestStopKm } from "./geo";
 import type { Appel, DayStop, Tech, TechRoute, Unassigned } from "./types";
 
 /** Soft road window: techs should be off the road by 17:00 (8–5). Soft = warn + ignore. */
@@ -165,7 +166,7 @@ function pickTech(
   if (eligible.length === 0) return null;
 
   const scored = eligible.map((tech) => {
-    const sameRegion = tech.region === appel.region ? 4 : 0;
+    const sameRegion = appel.region && tech.region === appel.region ? 4 : 0;
     const dual =
       appel.type === "preventif" &&
       assigned[tech.id].some(
@@ -183,9 +184,13 @@ function pickTech(
     return {
       tech,
       score: sameRegion + dual + hasReactif + loadBalance + lessCrowded,
+      distanceKm: nearestStopKm(
+        appel,
+        assigned[tech.id].map((stop) => stop.appel),
+      ),
     };
   });
-  scored.sort((a, b) => b.score - a.score);
+  scored.sort(compareScoreThenDistance);
   return scored[0]?.tech ?? null;
 }
 
@@ -205,7 +210,9 @@ export function optimizeDay(options: {
   const durations = options.durations ?? DEFAULT_DURATIONS;
   const allowOvertime = options.allowOvertime ?? false;
   const present = options.techs.filter((tech) => tech.present);
-  const regions = new Set(present.map((tech) => tech.region));
+  const regions = new Set(
+    present.map((tech) => tech.region.trim()).filter(Boolean),
+  );
   const byTech: Record<string, DayStop[]> = Object.fromEntries(
     present.map((tech) => [tech.id, [] as DayStop[]]),
   );

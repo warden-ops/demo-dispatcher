@@ -1,5 +1,6 @@
 import { cachedRead, clearNetsuiteCache } from "./cache";
 import { createNetsuiteClient, type NetsuiteClient } from "./client";
+import { geocodeAppels } from "./geocode";
 import {
   isNetsuiteConfigured,
   isNetsuiteWriteEnabled,
@@ -19,9 +20,12 @@ import {
 } from "./mapping";
 import {
   APPELS_SUITEQL,
+  APPELS_SUITEQL_TEXT,
   CUSTOMERS_SUITEQL,
   ITEMS_SUITEQL,
   TECHS_SUITEQL,
+  TECHS_SUITEQL_LOCATION,
+  TECHS_SUITEQL_PLAIN,
 } from "./queries";
 
 export type JsonResult = {
@@ -41,6 +45,24 @@ function clientOrCreate(
   return client ?? createNetsuiteClient({ env });
 }
 
+/** Lecture seule. La première requête qui répond est gardée. */
+async function suiteqlFirstWorking(
+  api: NetsuiteClient,
+  queries: string[],
+): Promise<Record<string, unknown>[]> {
+  let lastError: unknown;
+  for (const query of queries) {
+    try {
+      return await api.suiteqlAll(query);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Lecture NetSuite impossible.");
+}
+
 export async function readAppelsResponse(
   env: EnvMap = process.env,
   client?: NetsuiteClient,
@@ -51,9 +73,12 @@ export async function readAppelsResponse(
   try {
     const api = clientOrCreate(env, client);
     const appels = await cachedRead("appels", async () =>
-      mapAppelRows(await api.suiteqlAll(APPELS_SUITEQL)),
+      mapAppelRows(
+        await suiteqlFirstWorking(api, [APPELS_SUITEQL, APPELS_SUITEQL_TEXT]),
+      ),
     );
-    return { status: 200, body: { demo: false, appels } };
+    const located = await geocodeAppels(appels, env);
+    return { status: 200, body: { demo: false, appels: located } };
   } catch (error) {
     return { status: 502, body: { error: publicMessage(error) } };
   }
@@ -69,7 +94,13 @@ export async function readTechsResponse(
   try {
     const api = clientOrCreate(env, client);
     const techs = await cachedRead("techs", async () =>
-      mapTechRows(await api.suiteqlAll(TECHS_SUITEQL)),
+      mapTechRows(
+        await suiteqlFirstWorking(api, [
+          TECHS_SUITEQL,
+          TECHS_SUITEQL_LOCATION,
+          TECHS_SUITEQL_PLAIN,
+        ]),
+      ),
     );
     return { status: 200, body: { demo: false, techs } };
   } catch (error) {

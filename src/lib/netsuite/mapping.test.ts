@@ -10,7 +10,12 @@ import {
   mapTechRows,
   villeFromAddress,
 } from "./mapping";
-import { APPELS_SUITEQL, TECHS_SUITEQL } from "./queries";
+import {
+  APPELS_SUITEQL,
+  APPELS_SUITEQL_TEXT,
+  TECHS_SUITEQL,
+  TECHS_SUITEQL_PLAIN,
+} from "./queries";
 
 describe("mapping SuiteQL", () => {
   it("transforme une tâche Maintenance en appel préventif", () => {
@@ -96,6 +101,53 @@ describe("mapping SuiteQL", () => {
     assert.equal(mapTechRow({ id: "9", department: "Ventes" }), null);
   });
 
+  it("préfère la ville structurée et retombe sur le bloc NetSuite", () => {
+    const structured = mapAppelRow({
+      task_id: "70",
+      case_id: "71",
+      case_type: "7",
+      site: "Couche-Tard",
+      address: "849 SECOND LINE EAST\r\nSAULT STE. MARIE ON P6B 4K5",
+      site_city: "Drummondville",
+      site_state: "QC",
+      site_zip: "J2C 2N6",
+      lat: "45.883",
+      lng: "-72.484",
+    });
+    assert.equal(structured?.ville, "Drummondville");
+    assert.equal(structured?.region, "Centre-du-Québec");
+    assert.equal(structured?.lat, 45.883);
+    assert.equal(structured?.lng, -72.484);
+
+    const parsed = mapAppelRow({
+      task_id: "72",
+      case_id: "73",
+      case_type: "6",
+      address: "849 SECOND LINE EAST\r\nSAULT STE. MARIE ON P6B 4K5",
+    });
+    assert.equal(parsed?.ville, "Sault Ste. Marie");
+    assert.equal(parsed?.region, "Nord de l'Ontario — P6");
+    assert.equal(parsed?.lat, undefined);
+  });
+
+  it("donne au technicien la même région qu'un appel de sa ville", () => {
+    const tech = mapTechRow({
+      id: "77",
+      firstname: "Marie",
+      lastname: "Roy",
+      department: "Atelier",
+      location: "Drummondville",
+    });
+    const appel = mapAppelRow({
+      task_id: "74",
+      case_id: "75",
+      case_type: "7",
+      address: "450 RUE BROCK\r\nDRUMMONDVILLE QC J2C 2N6",
+    });
+    assert.equal(tech?.region, "Centre-du-Québec");
+    assert.equal(tech?.region, appel?.region);
+  });
+
   it("lit clients et articles", () => {
     assert.deepEqual(
       mapCustomerRows([{ id: "3", companyname: "IGA", email: "a@b.c" }]),
@@ -119,6 +171,13 @@ describe("mapping SuiteQL", () => {
     assert.match(APPELS_SUITEQL, /s\.status NOT IN \(17, 19, 20\)/);
     assert.match(APPELS_SUITEQL, /PROD-CASE-%/);
     assert.match(APPELS_SUITEQL, /PROD-TASK-%/);
+    assert.match(APPELS_SUITEQL, /entityAddress/);
+    assert.match(APPELS_SUITEQL, /site_city/);
+    assert.match(APPELS_SUITEQL, /customer_zip/);
+    assert.equal(APPELS_SUITEQL_TEXT.includes("entityAddress"), false);
+    assert.match(APPELS_SUITEQL_TEXT, /PROD-CASE-%/);
     assert.match(TECHS_SUITEQL, /isinactive = 'F'/);
+    assert.match(TECHS_SUITEQL, /location/);
+    assert.match(TECHS_SUITEQL_PLAIN, /isinactive = 'F'/);
   });
 });

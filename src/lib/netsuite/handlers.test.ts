@@ -165,6 +165,41 @@ describe("réponses API NetSuite", { concurrency: 1 }, () => {
     ]);
   });
 
+  it("retombe sur le texte si la jointure d'adresse est refusée", async () => {
+    const seen: string[] = [];
+    const client: NetsuiteClient = {
+      async suiteql() {
+        throw new Error("inutile");
+      },
+      async suiteqlAll(query) {
+        seen.push(query.includes("entityAddress") ? "join" : "texte");
+        if (query.includes("entityAddress")) {
+          throw new Error("Unknown field entityAddress");
+        }
+        return [
+          {
+            task_id: "90",
+            case_id: "91",
+            case_type: "7",
+            site: "Couche-Tard",
+            address: "849 SECOND LINE EAST\r\nSAULT STE. MARIE ON P6B 4K5",
+          },
+        ];
+      },
+      async patchRecord() {
+        throw new Error("pas d'écriture");
+      },
+    };
+    const result = await readAppelsResponse(ENV, client);
+    assert.equal(result.status, 200);
+    const body = result.body as {
+      appels: { ville: string; region: string }[];
+    };
+    assert.equal(body.appels[0]?.ville, "Sault Ste. Marie");
+    assert.equal(body.appels[0]?.region, "Nord de l'Ontario — P6");
+    assert.deepEqual(seen, ["join", "texte"]);
+  });
+
   it("valide le corps et construit le PATCH documenté", () => {
     const [item] = parseDispatchBody([
       { taskId: "10", techId: "11", date: "2026-11-10" },

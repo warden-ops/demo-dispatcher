@@ -4,6 +4,17 @@ import {
   EQUIPMENT,
 } from "../guertech/constants";
 import type { Appel, CallType, Tech } from "../guertech/types";
+import {
+  deriveRegion,
+  formatPlaceName,
+  normalizeLookup,
+  normalizePostal,
+  normalizeProvince,
+  parseAddressText,
+  villeFromAddress,
+} from "./address";
+
+export { normalizeLookup, villeFromAddress };
 
 /** Files d'attente, pas des techniciens sur la route. */
 export const PLACEHOLDER_TECH_IDS = new Set(["35274", "228238"]);
@@ -13,37 +24,6 @@ export const TECH_DEPARTMENTS = [
   "Technicien mobile",
   "Atelier",
 ] as const;
-
-const CITY_REGION: Record<string, string> = {
-  becancour: "Centre-du-Québec",
-  drummondville: "Centre-du-Québec",
-  nicolet: "Centre-du-Québec",
-  plessisville: "Centre-du-Québec",
-  princeville: "Centre-du-Québec",
-  victoriaville: "Centre-du-Québec",
-  "la tuque": "Mauricie",
-  shawinigan: "Mauricie",
-  "trois-rivieres": "Mauricie",
-  asbestos: "Estrie",
-  coaticook: "Estrie",
-  granby: "Estrie",
-  magog: "Estrie",
-  sherbrooke: "Estrie",
-  windsor: "Estrie",
-  levis: "Chaudière-Appalaches",
-  montmagny: "Chaudière-Appalaches",
-  "saint-georges": "Chaudière-Appalaches",
-  "sainte-marie": "Chaudière-Appalaches",
-  "thetford mines": "Chaudière-Appalaches",
-  brossard: "Montérégie",
-  chambly: "Montérégie",
-  longueuil: "Montérégie",
-  "saint-hyacinthe": "Montérégie",
-  "saint-jean-sur-richelieu": "Montérégie",
-  "salaberry-de-valleyfield": "Montérégie",
-  "sorel-tracy": "Montérégie",
-  "vaudreuil-dorion": "Montérégie",
-};
 
 export type NetsuiteCustomer = {
   id: string;
@@ -63,15 +43,6 @@ export function cell(row: Record<string, unknown>, key: string): string {
   return String(direct).trim();
 }
 
-export function normalizeLookup(value: string): string {
-  return value
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 export function normalizeHeure(value: string): string {
   const match = /^(\d{1,2}):(\d{2})/.exec(value.trim());
   if (!match) return "";
@@ -88,23 +59,18 @@ function plainId(value: string): string {
   return value;
 }
 
-export function villeFromAddress(address: string): string {
-  const parts = address
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean);
-  if (parts.length < 2) return "";
-  const candidate = parts[parts.length - 2]
-    .replace(/\b[A-Z]\d[A-Z]\s?\d[A-Z]\d\b/i, "")
-    .replace(/\b(QC|Quebec|Québec)\b/gi, "")
-    .trim();
-  if (!candidate || /^(QC|Quebec|Québec)$/i.test(candidate)) return "";
-  return candidate;
+function firstFilled(...values: string[]): string {
+  return values.find((value) => value.trim())?.trim() ?? "";
 }
 
-export function regionFromVille(ville: string): string {
-  if (!ville) return "";
-  return CITY_REGION[normalizeLookup(ville)] ?? "";
+function readLatLng(lat: string, lng: string): { lat: number; lng: number } | null {
+  if (!lat || !lng) return null;
+  const latitude = Number(lat);
+  const longitude = Number(lng);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  if (latitude === 0 && longitude === 0) return null;
+  if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return null;
+  return { lat: latitude, lng: longitude };
 }
 
 export function matchEquipment(name: string): {
@@ -152,7 +118,32 @@ export function mapAppelRow(row: Record<string, unknown>): Appel | null {
   const address =
     cell(row, "address") ||
     coordinateAddress(cell(row, "lat"), cell(row, "lng"));
-  const ville = villeFromAddress(address);
+  const parsed = parseAddressText(address);
+  const ville = formatPlaceName(
+    firstFilled(
+      cell(row, "site_city"),
+      cell(row, "customer_city"),
+      cell(row, "city"),
+      parsed.ville,
+    ),
+  );
+  const province =
+    normalizeProvince(
+      firstFilled(
+        cell(row, "site_state"),
+        cell(row, "customer_state"),
+        cell(row, "state"),
+      ),
+    ) || parsed.province;
+  const postal =
+    normalizePostal(
+      firstFilled(
+        cell(row, "site_zip"),
+        cell(row, "customer_zip"),
+        cell(row, "zip"),
+      ),
+    ) || parsed.postal;
+  const coords = readLatLng(cell(row, "lat"), cell(row, "lng"));
   const equipment = matchEquipment(cell(row, "asset"));
   const rawTech = plainId(cell(row, "tech_id"));
   const techId =
@@ -168,7 +159,8 @@ export function mapAppelRow(row: Record<string, unknown>): Appel | null {
     magasin: caseNumber ? `${caseNumber} · ${site}` : site,
     adresse: address,
     ville,
-    region: regionFromVille(ville),
+    region: deriveRegion({ ville, province, postal }),
+    ...(coords ?? {}),
     equipement: equipment.equipement,
     equipementId: equipment.equipementId,
     netsuiteId: /^\d+$/.test(caseId) ? caseId : caseNumber || taskId,
@@ -180,9 +172,15 @@ export function mapAppelRow(row: Record<string, unknown>): Appel | null {
 }
 
 export function mapAppelRows(rows: Record<string, unknown>[]): Appel[] {
-  return rows
-    .map((row) => mapAppelRow(row))
-    .filter((appel): appel is Appel => appel !== null);
+  const seen = new Set<string>();
+  const appels: Appel[] = [];
+  for (const row of rows) {
+    const appel = mapAppelRow(row);
+    if (!appel || seen.has(appel.id)) continue;
+    seen.add(appel.id);
+    appels.push(appel);
+  }
+  return appels;
 }
 
 function departmentAllowed(department: string): boolean {
@@ -203,6 +201,8 @@ export function mapTechRow(row: Record<string, unknown>): Tech | null {
     cell(row, "entityid") ||
     `Technicien ${id}`;
 
+  const ville = cell(row, "city");
+  const location = cell(row, "location");
   return {
     id,
     name: `${person} · ${department}`,
@@ -212,15 +212,26 @@ export function mapTechRow(row: Record<string, unknown>): Tech | null {
     startHour: "",
     endHour: "",
     hours: 0,
-    region: "",
+    region: deriveRegion({
+      ville,
+      province: cell(row, "state"),
+      postal: cell(row, "zip"),
+      explicit: location,
+    }),
     skills: [...ALL_SKILL_IDS, 0],
   };
 }
 
 export function mapTechRows(rows: Record<string, unknown>[]): Tech[] {
-  return rows
-    .map((row) => mapTechRow(row))
-    .filter((tech): tech is Tech => tech !== null);
+  const seen = new Set<string>();
+  const techs: Tech[] = [];
+  for (const row of rows) {
+    const tech = mapTechRow(row);
+    if (!tech || seen.has(tech.id)) continue;
+    seen.add(tech.id);
+    techs.push(tech);
+  }
+  return techs;
 }
 
 export function mapCustomerRows(
