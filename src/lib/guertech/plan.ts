@@ -81,6 +81,7 @@ export async function planDispatch(input: {
       ...solved.stats,
       travelMs,
       travelSource: matrix.source,
+      ...(matrix.warning ? { travelWarning: matrix.warning } : {}),
     },
   };
 }

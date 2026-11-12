@@ -151,7 +151,8 @@ export function mapAppelRow(row: Record<string, unknown>): Appel | null {
       ? rawTech
       : "";
   const heure = normalizeHeure(cell(row, "start_time"));
-  const openedAt = cell(row, "opened_at") || cell(row, "start_date");
+  const scheduledOn = cell(row, "start_date");
+  const openedAt = cell(row, "opened_at") || scheduledOn;
 
   return {
     id: taskId,
@@ -168,6 +169,7 @@ export function mapAppelRow(row: Record<string, unknown>): Appel | null {
     heure,
     techId,
     openedAt,
+    ...(scheduledOn ? { scheduledOn } : {}),
   };
 }
 

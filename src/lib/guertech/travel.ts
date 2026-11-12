@@ -23,12 +23,18 @@ const MATRIX_URL =
   "https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix";
 const PAIR_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
+export const GOOGLE_UNAVAILABLE = "Temps estimés, Google indisponible";
+
 export type TravelMatrix = {
   minutes: Float64Array;
   km: Float64Array;
   size: number;
   source: "haversine" | "google" | "mixed";
+  warning?: string;
 };
+
+const GOOGLE_BLOCK_MS = 10 * 60 * 1000;
+let googleBlockedUntil = 0;
 
 type Pair = { minutes: number; km: number; expiresAt: number };
 
@@ -38,6 +44,23 @@ let loadedPath = "";
 export function clearTravelCache(): void {
   memoryPairs.clear();
   loadedPath = "";
+  googleBlockedUntil = 0;
+}
+
+function googleIsBlocked(now: number): boolean {
+  return googleBlockedUntil > now;
+}
+
+function fatalGoogleStatus(status: number, body: string): boolean {
+  if (status === 403 || status === 429) return true;
+  const text = body.toUpperCase();
+  return (
+    text.includes("BILLING_DISABLED") ||
+    text.includes("REQUEST_DENIED") ||
+    text.includes("OVER_QUERY_LIMIT") ||
+    text.includes("OVER_DAILY_LIMIT") ||
+    text.includes("RESOURCE_EXHAUSTED")
+  );
 }
 
 export function travelMinutesFromKm(km: number): number {
@@ -161,7 +184,14 @@ export async function fetchGoogleMatrix(options: {
       }),
       signal: AbortSignal.timeout(2500),
     });
-    if (!response.ok) return [];
+    if (!response.ok) {
+      const body = await response.text();
+      if (fatalGoogleStatus(response.status, body)) {
+        googleBlockedUntil = Date.now() + GOOGLE_BLOCK_MS;
+        throw new Error(GOOGLE_UNAVAILABLE);
+      }
+      return [];
+    }
     const payload = (await response.json()) as MatrixElement[] | { error?: unknown };
     if (!Array.isArray(payload)) return [];
     const pairs: Array<{ origin: number; destination: number; minutes: number; km: number }> = [];
@@ -181,7 +211,8 @@ export async function fetchGoogleMatrix(options: {
       });
     }
     return pairs;
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.message === GOOGLE_UNAVAILABLE) throw error;
     return [];
   }
 }
@@ -245,7 +276,12 @@ export async function buildTravelMatrix(
   const now = options?.now ?? Date.now();
   await ensureDisk(env, now);
   if (!apiKey || points.length < 2) return matrix;
+  if (googleIsBlocked(now)) {
+    matrix.warning = GOOGLE_UNAVAILABLE;
+    return matrix;
+  }
 
+  try {
   const deadline = now + (options?.budgetMs ?? 1500);
   let googleCells = 0;
   const size = points.length;
@@ -389,4 +425,12 @@ export async function buildTravelMatrix(
     await persistDisk(env);
   }
   return matrix;
+  } catch (error) {
+    if (error instanceof Error && error.message === GOOGLE_UNAVAILABLE) {
+      const fallback = haversineMatrix(points);
+      fallback.warning = GOOGLE_UNAVAILABLE;
+      return fallback;
+    }
+    throw error;
+  }
 }

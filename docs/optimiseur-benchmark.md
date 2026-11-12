@@ -15,7 +15,7 @@ Les appels de Sault Ste. Marie, Wawa, Sept-Îles, Corner Brook et Tillsonburg ne
 | Temps de route total | 566.3 h | 273.4 h |
 | Temps de route des journées finissant à 17 h | 67.9 h | 273.4 h |
 | Journées qui dépassent 17 h | 52 | 0 |
-| Durée du calcul | 10 ms | 150 ms |
+| Durée du calcul | 9 ms | 109 ms |
 
 Voyages proposés, non posés au calendrier :
 
@@ -26,7 +26,7 @@ Voyages proposés, non posés au calendrier :
 | Tillsonburg | nuitée | 1 | 7.9 h |
 | Sept-Îles | nuitée | 2 | 7.2 h |
 
-Le calcul de 300 × 14 reste sous 3 s (150 ms ici, budget de recherche locale 900 ms).
+Le calcul de 300 × 14 reste sous 3 s (109 ms ici, budget de recherche locale 900 ms).
 
 ## Échantillon façon production
 
@@ -43,4 +43,16 @@ Même optimiseur, deux matrices. « Avant » : vol d'oiseau × 1,3 à 72 km/h (l
 | Fin la plus tardive | 17.7 h | 17.7 h |
 
 Les rendez-vous fixes (Saint-Jean 8 h et 9 h, Ange-Gardien 13 h, Val-David 13 h 45, Saint-Hyacinthe 15 h 30) et Saint-Anselme sans heure sont dans les appels placés de la colonne Après. Sault Ste. Marie et Wawa restent un voyage, parce que l'aller-retour ne rentre pas dans la journée. Une adresse sans ville ni code postal connu reste « Adresse à valider » avant le solveur (hors de ce tableau).
+
+
+## Rendez-vous passés
+
+| | Avant (tout sur le jour 1) | Après (passé = flexible) |
+| --- | --- | --- |
+| Appels placés | 26 | 37 |
+| Non placés | 11 | 0 |
+| Raisons | 11 × Rendez-vous planifié incompatible avec un départ dès 5 h et un retour après 17:00. | — |
+| Capacité | 5 journées occupées, 15 vides, 1152 min libres au total, 0 RDV à replanifier | 6 journées occupées, 14 vides, 801 min libres au total, 12 RDV à replanifier |
+
+Le retour au dépôt n'est pas compté deux fois : un arrêt seul finit à départ + trajet + durée sur place + retour, et ce total est le même test que « la journée vide peut-elle accueillir cet appel ». Avec un quota de 40 préventifs par jour, les appels restants sont refusés parce que les journées sont pleines ou que le quota est déjà pris, pas parce que le retour est ajouté en double.
 

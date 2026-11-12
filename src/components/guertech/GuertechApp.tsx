@@ -1019,8 +1019,9 @@ function Workspace() {
           setPlanStats(plan.stats);
           setOvertimeWarnings([]);
           setOvertimeIgnored(false);
-          const travelLabel =
-            plan.stats.travelSource === "haversine"
+          const travelLabel = plan.stats.travelWarning
+            ? plan.stats.travelWarning
+            : plan.stats.travelSource === "haversine"
               ? "temps estimés"
               : "temps Google";
           const prefix = options?.toastPrefix ? `${options.toastPrefix} — ` : "";
@@ -1285,6 +1286,7 @@ function Workspace() {
                   ? `${planStats.served} arrêts tenus avant 17 h · ${formatHoursFr(planStats.driveMin)} de route · ${planStats.remoteCalls} appel(s) en voyage dédié`
                   : undefined
               }
+              planWarning={planStats?.travelWarning}
               onAcceptSuggestion={acceptSuggestion}
               onRefuseSuggestion={refuseSuggestion}
               onAcceptAllSuggestions={acceptAllSuggestions}

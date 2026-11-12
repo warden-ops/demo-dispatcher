@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { DEPOT, cityFromText } from "./territory";
-import { buildTravelMatrix, clearTravelCache, haversineMatrix, travelMinutesFromKm } from "./travel";
+import {
+  GOOGLE_UNAVAILABLE,
+  buildTravelMatrix,
+  clearTravelCache,
+  haversineMatrix,
+  travelMinutesFromKm,
+} from "./travel";
 import { distanceKm } from "./geo";
 
 afterEach(() => {
@@ -110,5 +116,39 @@ describe("temps de route", () => {
     });
     assert.ok(calls >= 2, `appels Google ${calls}`);
     assert.notEqual(matrix.source, "haversine");
+  });
+
+  it("s'arrête au premier refus de facturation Google", async () => {
+    clearTravelCache();
+    const points = Array.from({ length: 40 }, (_, index) => ({
+      lat: 44 + (index % 8) * 0.5,
+      lng: -78 + Math.floor(index / 8) * 0.6,
+    }));
+    let calls = 0;
+    const fetchImpl: typeof fetch = async () => {
+      calls += 1;
+      return new Response(
+        JSON.stringify({
+          error: { status: "PERMISSION_DENIED", message: "BILLING_DISABLED" },
+        }),
+        { status: 403 },
+      );
+    };
+    const started = Date.now();
+    const matrix = await buildTravelMatrix(points, {
+      env: { GOOGLE_MAPS_SERVER_API_KEY: "test-key" },
+      fetchImpl,
+      budgetMs: 8000,
+    });
+    const again = await buildTravelMatrix(points, {
+      env: { GOOGLE_MAPS_SERVER_API_KEY: "test-key" },
+      fetchImpl,
+      budgetMs: 8000,
+    });
+    assert.equal(calls, 1);
+    assert.equal(matrix.source, "haversine");
+    assert.equal(matrix.warning, GOOGLE_UNAVAILABLE);
+    assert.equal(again.warning, GOOGLE_UNAVAILABLE);
+    assert.ok(Date.now() - started < 1500, `durée ${Date.now() - started}`);
   });
 });

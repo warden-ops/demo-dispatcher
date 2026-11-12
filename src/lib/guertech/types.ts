@@ -18,6 +18,8 @@ export type Appel = {
   techId: string;
   /** ISO date (YYYY-MM-DD) when the call was opened — used for réactif SLA. */
   openedAt: string;
+  /** Date du rendez-vous déjà posé dans NetSuite (tâche), si elle existe. */
+  scheduledOn?: string;
 };
 
 export type Tech = {
@@ -95,5 +97,7 @@ export type PlanStats = {
   elapsedMs: number;
   travelMs: number;
   travelSource: "haversine" | "google" | "mixed";
+  /** Présent quand Google a refusé (facturation, quota) et que le repli est utilisé. */
+  travelWarning?: string;
   overtimeRoutes: number;
 };

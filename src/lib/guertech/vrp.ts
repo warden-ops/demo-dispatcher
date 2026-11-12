@@ -170,11 +170,32 @@ export function solveVrp(input: SolveInput): SolveResult {
     if (region !== 0) covered[region] = 1;
   }
 
+  const pinKind = new Array<"hard" | "replan" | "later" | "none">(callCount).fill(
+    "none",
+  );
+  const pinDay = new Int16Array(callCount).fill(-1);
   for (let index = 0; index < callCount; index += 1) {
     const appel = calls[index];
     service[index] = onSiteMinutes(appel.type, durations);
-    isPinned[index] = appel.planifie ? 1 : 0;
-    if (appel.planifie && appel.heure) heureMin[index] = parseMinutes(appel.heure);
+    const when = (appel.scheduledOn ?? "").slice(0, 10);
+    if (appel.planifie && !when) {
+      pinKind[index] = "hard";
+      pinDay[index] = 0;
+    } else if (appel.planifie && when < days[0]) {
+      pinKind[index] = "replan";
+    } else if (appel.planifie) {
+      const day = days.indexOf(when);
+      if (day >= 0) {
+        pinKind[index] = "hard";
+        pinDay[index] = day;
+      } else {
+        pinKind[index] = "later";
+      }
+    }
+    if (pinKind[index] === "hard" && appel.heure) {
+      isPinned[index] = 1;
+      heureMin[index] = parseMinutes(appel.heure);
+    }
     const due = addBusinessDays(appel.openedAt || input.startDate, SLA.reactif.delayDays);
     if (appel.type === "reactif") {
       if (due < days[0]) overdue[index] = 1;
@@ -187,8 +208,10 @@ export function solveVrp(input: SolveInput): SolveResult {
       }
     }
     const owner = techById.get(appel.techId);
-    if (appel.planifie && owner != null) locked[index] = owner;
-    else if (!input.moveAssigned && appel.techId && owner != null) locked[index] = owner;
+    if (pinKind[index] === "hard" && owner != null) locked[index] = owner;
+    else if (!input.moveAssigned && appel.techId && owner != null && pinKind[index] !== "replan") {
+      locked[index] = owner;
+    }
   }
 
   const skillOk = new Uint8Array(techCount * callCount);
@@ -210,7 +233,7 @@ export function solveVrp(input: SolveInput): SolveResult {
 
   const remote = new Uint8Array(callCount);
   for (let call = 0; call < callCount; call += 1) {
-    if (calls[call].planifie) continue;
+    if (pinKind[call] === "hard" || pinKind[call] === "later") continue;
     let fits = false;
     for (let tech = 0; tech < techCount; tech += 1) {
       const depot = callCount + tech;
@@ -330,8 +353,8 @@ export function solveVrp(input: SolveInput): SolveResult {
       return a.appel.id < b.appel.id ? -1 : 1;
     });
 
-  const placeTimedPin = (index: number, tech: number) => {
-    const route = routeAt(0, tech);
+  const placeTimedPin = (index: number, tech: number, day: number) => {
+    const route = routeAt(day, tech);
     const next = route.stops.concat(index);
     const evaluated = evaluate(next, tech);
     if (!evaluated) return false;
@@ -340,9 +363,20 @@ export function solveVrp(input: SolveInput): SolveResult {
     return true;
   };
 
+  for (let index = 0; index < callCount; index += 1) {
+    if (pinKind[index] !== "later") continue;
+    const when = calls[index].scheduledOn;
+    unassigned.push({
+      appel: calls[index],
+      reason: `Rendez-vous le ${when}, hors de cet horizon.`,
+    });
+    placed[index] = 1;
+  }
+
   for (const pin of pins) {
-    if (!pin.appel.heure) continue;
+    if (pinKind[pin.index] !== "hard" || !pin.appel.heure) continue;
     const named = techById.get(pin.appel.techId);
+    const day = pinDay[pin.index];
     if (pin.appel.techId && named == null) {
       unassigned.push({
         appel: pin.appel,
@@ -350,7 +384,7 @@ export function solveVrp(input: SolveInput): SolveResult {
       });
       continue;
     }
-    if (named != null && placeTimedPin(pin.index, named)) continue;
+    if (named != null && placeTimedPin(pin.index, named, day)) continue;
     if (named != null) {
       unassigned.push({
         appel: pin.appel,
@@ -360,7 +394,7 @@ export function solveVrp(input: SolveInput): SolveResult {
     }
     let placedTech = false;
     for (let tech = 0; tech < techCount; tech += 1) {
-      if (placeTimedPin(pin.index, tech)) {
+      if (placeTimedPin(pin.index, tech, day)) {
         placedTech = true;
         break;
       }
@@ -482,7 +516,8 @@ export function solveVrp(input: SolveInput): SolveResult {
     if (!zoned) {
       return `Hors de la zone des techniciens (${calls[call].region}).`;
     }
-    if (asPreventif && [...pmCount].every((count) => count >= quota)) {
+    const counts = [...pmCount];
+    if (asPreventif && counts.every((count) => count >= quota)) {
       return "Quota de préventifs atteint.";
     }
     if (calls[call].type === "reactif" && overdue[call]) {
@@ -491,12 +526,38 @@ export function solveVrp(input: SolveInput): SolveResult {
     if (calls[call].type === "reactif") {
       return "Aucun créneau avant la fin du délai SLA et avant 17 h.";
     }
+    if (asPreventif && counts.some((count) => count >= quota)) {
+      return "Journées restantes pleines avant 17 h. Le quota est déjà atteint sur les journées qui avaient encore du temps.";
+    }
     return "Aucun créneau avant 17 h, retour au dépôt inclus.";
   };
 
+  const replanOrder = calls
+    .map((appel, index) => ({ appel, index }))
+    .filter((item) => pinKind[item.index] === "replan" && !placed[item.index] && !remote[item.index])
+    .sort((a, b) => (a.appel.scheduledOn ?? "").localeCompare(b.appel.scheduledOn ?? "") || (a.appel.id < b.appel.id ? -1 : 1));
+  for (const item of replanOrder) {
+    const owner = techById.get(item.appel.techId);
+    if (owner != null) locked[item.index] = owner;
+    let choice = chooseInsertion(item.index, false, 400);
+    if (!choice && owner != null) {
+      locked[item.index] = -1;
+      choice = chooseInsertion(item.index, false, 400);
+    }
+    if (!choice) {
+      unassigned.push({
+        appel: item.appel,
+        reason: "RDV à replanifier : aucun créneau avant 17 h.",
+      });
+      continue;
+    }
+    commit(routeAt(choice.day, choice.tech), choice.stops, choice.evaluated);
+    placed[item.index] = 1;
+  }
+
   for (let index = 0; index < callCount; index += 1) {
     const appel = calls[index];
-    if (!appel.planifie || appel.heure || placed[index]) continue;
+    if (pinKind[index] !== "hard" || appel.heure || placed[index]) continue;
     const choice = chooseInsertion(index, false, 400);
     if (!choice) {
       unassigned.push({
@@ -732,8 +793,10 @@ export function solveVrp(input: SolveInput): SolveResult {
       const leave = arrival + service[id];
       const appel = calls[id];
       let reason: string;
-      if (appel.planifie && appel.heure) {
-        reason = `Rendez-vous planifié à ${appel.heure}.`;
+      if (pinKind[id] === "replan") {
+        reason = "RDV à replanifier";
+      } else if (appel.planifie && appel.heure) {
+        reason = `Rendez-vous planifié à ${appel.heure} (${days[pinDay[id]] ?? days[0]}).`;
       } else if (appel.planifie) {
         reason = "Rendez-vous sans heure : placé dans la fenêtre 8 h–17 h.";
       } else if (index > 0 && dist < 0.3) {

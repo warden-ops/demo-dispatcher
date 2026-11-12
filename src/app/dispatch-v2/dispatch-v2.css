@@ -1220,6 +1220,16 @@
   border-bottom: 1px solid var(--gt-line);
 }
 
+.gt-travel-warning,
+.gt-replan-note {
+  margin: 0 0 0.75rem;
+  padding: 0.65rem 0.8rem;
+  border-radius: 10px;
+  background: #fff7ea;
+  border: 1px solid rgba(183, 121, 31, 0.35);
+  font-size: 0.9rem;
+}
+
 .gt-validate {
   margin: 0.6rem 0 0.8rem;
   padding: 0.7rem 0.8rem;
