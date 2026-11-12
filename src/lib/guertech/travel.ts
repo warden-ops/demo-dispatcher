@@ -4,9 +4,20 @@ import { distanceKm } from "./geo";
 import type { LatLng } from "./territory";
 import { readEnvValue, type EnvMap } from "../netsuite/config";
 
-/** Facteur route / vol d'oiseau, vitesse moyenne hors autoroute urbaine. */
+/**
+ * Repli sans Google. Court trajet : rues lentes. Long trajet : autoroute
+ * (~100 km/h, facteur proche de 1,1). Drummondville → Ottawa/Gatineau
+ * tombe autour de 2 h 45, pas 4 h.
+ */
 export const ROAD_FACTOR = 1.3;
 export const ROAD_SPEED_KMH = 72;
+
+function roadProfile(crowKm: number): { factor: number; speed: number } {
+  if (crowKm <= 30) return { factor: 1.3, speed: 70 };
+  if (crowKm >= 160) return { factor: 1.1, speed: 102 };
+  const t = (crowKm - 30) / 130;
+  return { factor: 1.3 + (1.1 - 1.3) * t, speed: 70 + (102 - 70) * t };
+}
 
 const MATRIX_URL =
   "https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix";
@@ -31,12 +42,13 @@ export function clearTravelCache(): void {
 
 export function travelMinutesFromKm(km: number): number {
   if (km < 0.05) return 0;
-  return Math.max(1, Math.round(((km * ROAD_FACTOR) / ROAD_SPEED_KMH) * 60));
+  const { factor, speed } = roadProfile(km);
+  return Math.max(1, Math.round(((km * factor) / speed) * 60));
 }
 
 export function roadKm(km: number): number {
   if (km < 0.05) return 0;
-  return Math.round(km * ROAD_FACTOR * 10) / 10;
+  return Math.round(km * roadProfile(km).factor * 10) / 10;
 }
 
 function pairKey(origin: LatLng, destination: LatLng): string {
@@ -207,10 +219,14 @@ function parseClusterKey(key: string): LatLng {
   return { lat, lng };
 }
 
+const GOOGLE_BATCH = 25;
+
 /**
- * Matrice de temps. Haversine × facteur route tout de suite.
- * Avec une clé, une matrice Google complète jusqu'à 25 points, sinon une
- * calibration par secteurs (~5 km) dans le budget. Le reste reste haversine.
+ * Matrice de temps. Le repli routier est posé tout de suite.
+ * Avec une clé, Google est appelé par secteurs (lots de 25×25, dans la limite
+ * de l'API), pas seulement quand il y a 25 secteurs ou moins. Le cache disque
+ * évite de redemander les mêmes paires. Le repli ne reste que là où Google
+ * n'a pas répondu.
  */
 export async function buildTravelMatrix(
   points: LatLng[],
@@ -287,32 +303,46 @@ export async function buildTravelMatrix(
     });
     const keys = [...groups.keys()];
     const centroids = keys.map(parseClusterKey);
-    if (centroids.length >= 2 && centroids.length <= 25 && Date.now() < deadline) {
-      const known = centroids.map((origin, originIndex) =>
-        centroids.map((destination, destinationIndex) => {
-          if (originIndex === destinationIndex) return true;
-          return recall(origin, destination, now) != null;
-        }),
-      );
-      const needNetwork = known.some((row, originIndex) =>
-        row.some((hit, destinationIndex) => originIndex !== destinationIndex && !hit),
-      );
-      const pairs = needNetwork
-        ? await fetchGoogleMatrix({
-            origins: centroids,
-            destinations: centroids,
+    if (centroids.length >= 2 && Date.now() < deadline) {
+      for (let originStart = 0; originStart < centroids.length; originStart += GOOGLE_BATCH) {
+        if (Date.now() >= deadline) break;
+        const originSlice = centroids.slice(originStart, originStart + GOOGLE_BATCH);
+        for (
+          let destinationStart = 0;
+          destinationStart < centroids.length;
+          destinationStart += GOOGLE_BATCH
+        ) {
+          if (Date.now() >= deadline) break;
+          const destinationSlice = centroids.slice(
+            destinationStart,
+            destinationStart + GOOGLE_BATCH,
+          );
+          let missing = false;
+          for (let origin = 0; origin < originSlice.length && !missing; origin += 1) {
+            for (let destination = 0; destination < destinationSlice.length; destination += 1) {
+              if (
+                originStart + origin !== destinationStart + destination &&
+                !recall(originSlice[origin], destinationSlice[destination], now)
+              ) {
+                missing = true;
+                break;
+              }
+            }
+          }
+          if (!missing) continue;
+          const pairs = await fetchGoogleMatrix({
+            origins: originSlice,
+            destinations: destinationSlice,
             apiKey,
             fetchImpl: options?.fetchImpl,
-          })
-        : [];
-      for (const pair of pairs) {
-        remember(
-          centroids[pair.origin],
-          centroids[pair.destination],
-          pair.minutes,
-          pair.km,
-          now,
-        );
+          });
+          for (const pair of pairs) {
+            const origin = originSlice[pair.origin];
+            const destination = destinationSlice[pair.destination];
+            if (!origin || !destination) continue;
+            remember(origin, destination, pair.minutes, pair.km, now);
+          }
+        }
       }
       for (let originIndex = 0; originIndex < keys.length; originIndex += 1) {
         for (

@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { DEPOT, cityFromText } from "./territory";
-import { buildTravelMatrix, clearTravelCache, haversineMatrix } from "./travel";
+import { buildTravelMatrix, clearTravelCache, haversineMatrix, travelMinutesFromKm } from "./travel";
+import { distanceKm } from "./geo";
 
 afterEach(() => {
   clearTravelCache();
@@ -69,5 +70,45 @@ describe("temps de route", () => {
     assert.equal(second.minutes[1], 80);
     assert.equal(second.minutes[2], 85);
     await rm(directory, { recursive: true, force: true });
+  });
+
+  it("estime Drummondville–Ottawa autour de 2 h 45", () => {
+    const ottawa = cityFromText("Ottawa");
+    const gatineau = cityFromText("Gatineau");
+    assert.ok(ottawa && gatineau);
+    const toOttawa = travelMinutesFromKm(distanceKm(DEPOT, ottawa) ?? 0);
+    const toGatineau = travelMinutesFromKm(distanceKm(DEPOT, gatineau) ?? 0);
+    assert.ok(toOttawa >= 150 && toOttawa <= 185, `Ottawa ${toOttawa}`);
+    assert.ok(toGatineau >= 150 && toGatineau <= 185, `Gatineau ${toGatineau}`);
+  });
+
+  it("interroge Google par lots au-delà de 25 secteurs", async () => {
+    const points = Array.from({ length: 30 }, (_, index) => ({
+      lat: 45.2 + (index % 10) * 0.4,
+      lng: -76.5 + Math.floor(index / 10) * 0.8,
+    }));
+    let calls = 0;
+    const fetchImpl: typeof fetch = async () => {
+      calls += 1;
+      return new Response(
+        JSON.stringify([
+          {
+            originIndex: 0,
+            destinationIndex: 1,
+            duration: "6000s",
+            distanceMeters: 120000,
+            condition: "ROUTE_EXISTS",
+          },
+        ]),
+        { status: 200 },
+      );
+    };
+    const matrix = await buildTravelMatrix(points, {
+      env: { GOOGLE_MAPS_SERVER_API_KEY: "test-key" },
+      fetchImpl,
+      budgetMs: 5000,
+    });
+    assert.ok(calls >= 2, `appels Google ${calls}`);
+    assert.notEqual(matrix.source, "haversine");
   });
 });

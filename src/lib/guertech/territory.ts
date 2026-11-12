@@ -54,7 +54,29 @@ export const TERRITORY_CITIES: TerritoryCity[] = [
   },
   { name: "Corner Brook", region: "Terre-Neuve-et-Labrador", lat: 48.95, lng: -57.952 },
   { name: "Tillsonburg", region: "Sud-ouest de l'Ontario — N4", lat: 42.861, lng: -80.726 },
+  { name: "Ottawa", region: "Est de l'Ontario — K1", lat: 45.4215, lng: -75.6972 },
+  { name: "Gatineau", region: "Outaouais", lat: 45.4765, lng: -75.7013 },
+  { name: "Saint-Jean-sur-Richelieu", region: "Montérégie", lat: 45.307, lng: -73.263 },
+  { name: "Ange-Gardien", region: "Montérégie", lat: 45.353, lng: -73.016 },
+  { name: "Val-David", region: "Laurentides", lat: 46.028, lng: -74.207 },
+  { name: "Saint-Anselme", region: "Chaudière-Appalaches", lat: 46.629, lng: -70.964 },
+  { name: "Baie-Saint-Paul", region: "Charlevoix", lat: 47.441, lng: -70.504 },
+  { name: "Rivière-du-Loup", region: "Bas-Saint-Laurent", lat: 47.836, lng: -69.535 },
+  { name: "Saguenay", region: "Saguenay–Lac-Saint-Jean", lat: 48.428, lng: -71.068 },
+  { name: "Thunder Bay", region: "Nord-ouest de l'Ontario", lat: 48.3809, lng: -89.2477 },
+  { name: "Great Village", region: "Nouvelle-Écosse", lat: 45.366, lng: -63.567 },
+  { name: "Glace Bay", region: "Nouvelle-Écosse", lat: 46.197, lng: -59.957 },
 ];
+
+/** Centroïdes d'FSA pour une adresse rurale sans ville reconnue. */
+const FSA_POINTS: Record<string, LatLng> = {
+  B0M: { lat: 45.366, lng: -63.567 },
+  B1A: { lat: 46.197, lng: -59.957 },
+  P7A: { lat: 48.381, lng: -89.248 },
+  P7B: { lat: 48.4, lng: -89.247 },
+  P7C: { lat: 48.42, lng: -89.26 },
+  P7E: { lat: 48.45, lng: -89.22 },
+};
 
 const BY_FOLD = new Map<string, TerritoryCity>();
 for (const city of TERRITORY_CITIES) {
@@ -127,12 +149,22 @@ export function hasCoordinates(point: {
   );
 }
 
-/** Coordonnées NetSuite, sinon ville connue. Jamais le dépôt par défaut. */
-export function pointForAppel(appel: Pick<Appel, "lat" | "lng" | "ville" | "adresse">): LatLng | null {
+const POSTAL_IN_TEXT = /\b([A-Za-z]\d[A-Za-z])\s?(\d[A-Za-z]\d)\b/;
+
+export function pointForPostal(text: string): LatLng | null {
+  const match = POSTAL_IN_TEXT.exec(text);
+  if (!match) return null;
+  return FSA_POINTS[match[1].toUpperCase()] ?? null;
+}
+
+/** Coordonnées NetSuite, sinon ville ou code postal connu. Jamais le dépôt par défaut. */
+export function pointForAppel(
+  appel: Pick<Appel, "lat" | "lng" | "ville" | "adresse">,
+): LatLng | null {
   if (hasCoordinates(appel)) return { lat: appel.lat, lng: appel.lng };
   const city = cityFromText(appel.ville) ?? cityFromText(appel.adresse);
-  if (!city) return null;
-  return jitter(city, appel.adresse || appel.ville || city.name);
+  if (city) return jitter(city, appel.adresse || appel.ville || city.name);
+  return pointForPostal(appel.adresse) ?? pointForPostal(appel.ville);
 }
 
 export function pointForStart(address: string | undefined): LatLng {

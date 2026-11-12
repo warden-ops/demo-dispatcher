@@ -1220,6 +1220,18 @@
   border-bottom: 1px solid var(--gt-line);
 }
 
+.gt-validate {
+  margin: 0.6rem 0 0.8rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid rgba(155, 44, 44, 0.35);
+  border-radius: 10px;
+  background: #fff7f5;
+}
+
+.gt-validate strong {
+  color: var(--gt-reactif);
+}
+
 .gt-unassigned li span {
   color: var(--gt-muted);
   font-size: 0.85rem;

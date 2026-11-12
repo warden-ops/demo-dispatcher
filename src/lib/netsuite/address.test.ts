@@ -122,6 +122,17 @@ describe("région", () => {
       "Terre-Neuve-et-Labrador",
     );
     assert.equal(parseAddressText(SAULT).ville, "Sault Ste. Marie");
+    assert.deepEqual(parseAddressText("12 COMMERCIAL STREET, GLACE BAY, NS NS"), {
+      ville: "Glace Bay",
+      province: "NS",
+      postal: "",
+    });
+    assert.deepEqual(parseAddressText("GLACE BAY NS NS B1A 1A1"), {
+      ville: "Glace Bay",
+      province: "NS",
+      postal: "B1A 1A1",
+    });
+    assert.equal(parseAddressText("55 MAIN STREET\r\nMONCTON NB NB E1C 1A1").ville, "Moncton");
   });
 
   it("ne classe pas Windsor en Ontario dans l'Estrie", () => {

@@ -13,6 +13,7 @@ import type { Appel, RemoteTrip, Tech, Unassigned } from "./types";
 
 const REMOTE_CLUSTER_MIN = 240;
 const OVERNIGHT_ONE_WAY_MIN = 300;
+const EARLIEST_DEPART_MIN = 5 * 60;
 const ZONE_PENALTY_MIN = 45;
 const LOAD_WEIGHT = 0.25;
 
@@ -36,6 +37,8 @@ export type PlannedRoute = {
   returnDriveMin: number;
   returnDriveKm: number;
   finishMin: number;
+  /** Départ du dépôt. Avant 8 h seulement pour arriver à un rendez-vous fixe. */
+  departMin: number;
 };
 
 export type SolveResult = {
@@ -75,6 +78,7 @@ type MutableRoute = {
   drive: number;
   driveKm: number;
   finish: number;
+  depart: number;
 };
 
 function at(values: Float64Array, size: number, from: number, to: number): number {
@@ -206,6 +210,7 @@ export function solveVrp(input: SolveInput): SolveResult {
 
   const remote = new Uint8Array(callCount);
   for (let call = 0; call < callCount; call += 1) {
+    if (calls[call].planifie) continue;
     let fits = false;
     for (let tech = 0; tech < techCount; tech += 1) {
       const depot = callCount + tech;
@@ -219,41 +224,70 @@ export function solveVrp(input: SolveInput): SolveResult {
     if (!fits) remote[call] = 1;
   }
 
-  const evaluate = (
+  const timedPin = (id: number) => isPinned[id] === 1 && heureMin[id] > 0;
+
+  const simulate = (
     stops: number[],
     tech: number,
-  ): { driveMin: number; driveKm: number; finish: number } | null => {
+    depart: number,
+  ): {
+    driveMin: number;
+    driveKm: number;
+    finish: number;
+    depart: number;
+    missedBy: number;
+  } | null => {
     const depot = callCount + tech;
-    const start = dayStart[tech];
     const end = dayEnd[tech];
-    if (stops.length === 0) return { driveMin: 0, driveKm: 0, finish: start };
-    let time = start;
+    if (stops.length === 0) {
+      return { driveMin: 0, driveKm: 0, finish: depart, depart, missedBy: 0 };
+    }
+    let time = depart;
     let prev = depot;
     let driveMin = 0;
     let driveKm = 0;
+    let missedBy = 0;
     for (const id of stops) {
       const travel = at(matrix.minutes, size, prev, id);
       const dist = at(matrix.km, size, prev, id);
       let arrival = time + travel;
       driveMin += travel;
       driveKm += dist;
-      if (isPinned[id]) {
+      if (timedPin(id)) {
         const heure = heureMin[id];
-        if (heure <= 0 || arrival > heure) return null;
-        if (heure > arrival) arrival = heure;
+        if (arrival > heure) missedBy = Math.max(missedBy, arrival - heure);
+        else if (heure > arrival) arrival = heure;
       }
       const leave = arrival + service[id];
-      if (leave > end) return null;
+      if (!timedPin(id) && leave > end) return null;
       time = leave;
       prev = id;
     }
     const back = at(matrix.minutes, size, prev, depot);
-    if (time + back > end) return null;
+    const finish = time + back;
+    const last = stops[stops.length - 1];
+    if (finish > end && !timedPin(last)) return null;
     return {
       driveMin: driveMin + back,
       driveKm: driveKm + at(matrix.km, size, prev, depot),
-      finish: time + back,
+      finish,
+      depart,
+      missedBy,
     };
+  };
+
+  const evaluate = (
+    stops: number[],
+    tech: number,
+  ): { driveMin: number; driveKm: number; finish: number; depart: number } | null => {
+    const start = dayStart[tech];
+    let simulated = simulate(stops, tech, start);
+    if (simulated && simulated.missedBy > 0) {
+      const earlier = Math.max(EARLIEST_DEPART_MIN, start - simulated.missedBy);
+      simulated = simulate(stops, tech, earlier);
+    }
+    if (!simulated || simulated.missedBy > 0) return null;
+    return simulated;
   };
 
   const routes: MutableRoute[] = [];
@@ -266,6 +300,7 @@ export function solveVrp(input: SolveInput): SolveResult {
         drive: 0,
         driveKm: 0,
         finish: dayStart[tech],
+        depart: dayStart[tech],
       });
     }
   }
@@ -274,11 +309,16 @@ export function solveVrp(input: SolveInput): SolveResult {
   const unassigned: Unassigned[] = [];
   const placed = new Uint8Array(callCount);
 
-  const commit = (route: MutableRoute, stops: number[], evaluated: { driveMin: number; driveKm: number; finish: number }) => {
+  const commit = (
+    route: MutableRoute,
+    stops: number[],
+    evaluated: { driveMin: number; driveKm: number; finish: number; depart: number },
+  ) => {
     route.stops = stops;
     route.drive = evaluated.driveMin;
     route.driveKm = evaluated.driveKm;
     route.finish = evaluated.finish;
+    route.depart = evaluated.depart;
   };
 
   const pins = calls
@@ -290,34 +330,47 @@ export function solveVrp(input: SolveInput): SolveResult {
       return a.appel.id < b.appel.id ? -1 : 1;
     });
 
+  const placeTimedPin = (index: number, tech: number) => {
+    const route = routeAt(0, tech);
+    const next = route.stops.concat(index);
+    const evaluated = evaluate(next, tech);
+    if (!evaluated) return false;
+    commit(route, next, evaluated);
+    placed[index] = 1;
+    return true;
+  };
+
   for (const pin of pins) {
-    const tech = techById.get(pin.appel.techId);
-    if (tech == null) {
+    if (!pin.appel.heure) continue;
+    const named = techById.get(pin.appel.techId);
+    if (pin.appel.techId && named == null) {
       unassigned.push({
         appel: pin.appel,
         reason: "Rendez-vous planifié : le technicien n'est pas présent.",
       });
       continue;
     }
-    if (!pin.appel.heure) {
+    if (named != null && placeTimedPin(pin.index, named)) continue;
+    if (named != null) {
       unassigned.push({
         appel: pin.appel,
-        reason: "Rendez-vous planifié : heure obligatoire.",
+        reason: `Rendez-vous planifié incompatible avec un départ dès 5 h et un retour après ${ROAD_WINDOW.softEndLabel}.`,
       });
       continue;
     }
-    const route = routeAt(0, tech);
-    const next = route.stops.concat(pin.index);
-    const evaluated = evaluate(next, tech);
-    if (!evaluated) {
+    let placedTech = false;
+    for (let tech = 0; tech < techCount; tech += 1) {
+      if (placeTimedPin(pin.index, tech)) {
+        placedTech = true;
+        break;
+      }
+    }
+    if (!placedTech) {
       unassigned.push({
         appel: pin.appel,
-        reason: `Rendez-vous planifié incompatible avec la fenêtre 8 h–${ROAD_WINDOW.softEndLabel}.`,
+        reason: `Rendez-vous planifié incompatible avec un départ dès 5 h et un retour après ${ROAD_WINDOW.softEndLabel}.`,
       });
-      continue;
     }
-    commit(route, next, evaluated);
-    placed[pin.index] = 1;
   }
 
   const dayAllowed = (call: number, day: number): boolean => {
@@ -360,10 +413,10 @@ export function solveVrp(input: SolveInput): SolveResult {
     extra: number;
     load: number;
     stops: number[];
-    evaluated: { driveMin: number; driveKm: number; finish: number };
+    evaluated: { driveMin: number; driveKm: number; finish: number; depart: number };
   };
 
-  const chooseInsertion = (call: number, asPreventif: boolean): Choice | null => {
+  const chooseInsertion = (call: number, asPreventif: boolean, dayBias = 4): Choice | null => {
     const choices: Choice[] = [];
     for (let day = 0; day < days.length; day += 1) {
       if (!dayAllowed(call, day)) continue;
@@ -372,7 +425,7 @@ export function solveVrp(input: SolveInput): SolveResult {
         if (locked[call] >= 0 && locked[call] !== tech) continue;
         if (!canTake(tech, call)) continue;
         const route = routeAt(day, tech);
-        const penalty = overdue[call] ? day * 400 : day * 4;
+        const penalty = overdue[call] ? day * 400 : day * dayBias;
         const currentScore = assignmentScore(
           route.drive,
           route.finish,
@@ -440,6 +493,21 @@ export function solveVrp(input: SolveInput): SolveResult {
     }
     return "Aucun créneau avant 17 h, retour au dépôt inclus.";
   };
+
+  for (let index = 0; index < callCount; index += 1) {
+    const appel = calls[index];
+    if (!appel.planifie || appel.heure || placed[index]) continue;
+    const choice = chooseInsertion(index, false, 400);
+    if (!choice) {
+      unassigned.push({
+        appel,
+        reason: "Rendez-vous sans heure : aucun créneau dans la fenêtre 8 h–17 h.",
+      });
+      continue;
+    }
+    commit(routeAt(choice.day, choice.tech), choice.stops, choice.evaluated);
+    placed[index] = 1;
+  }
 
   const reactives = calls
     .map((appel, index) => ({ appel, index }))
@@ -527,7 +595,12 @@ export function solveVrp(input: SolveInput): SolveResult {
         guard += 1;
         let bestStops: number[] | null = null;
         let best = route.drive;
-        let bestEval: { driveMin: number; driveKm: number; finish: number } | null = null;
+        let bestEval: {
+          driveMin: number;
+          driveKm: number;
+          finish: number;
+          depart: number;
+        } | null = null;
         for (let left = 0; left < route.stops.length - 1; left += 1) {
           for (let right = left + 1; right < route.stops.length; right += 1) {
             let blocked = false;
@@ -645,7 +718,7 @@ export function solveVrp(input: SolveInput): SolveResult {
   const describe = (route: MutableRoute) => {
     const depot = callCount + route.tech;
     const end = dayEnd[route.tech];
-    let time = dayStart[route.tech];
+    let time = route.depart || dayStart[route.tech];
     let prev = depot;
     let driveMin = 0;
     let driveKm = 0;
@@ -659,8 +732,10 @@ export function solveVrp(input: SolveInput): SolveResult {
       const leave = arrival + service[id];
       const appel = calls[id];
       let reason: string;
-      if (appel.planifie) {
+      if (appel.planifie && appel.heure) {
         reason = `Rendez-vous planifié à ${appel.heure}.`;
+      } else if (appel.planifie) {
+        reason = "Rendez-vous sans heure : placé dans la fenêtre 8 h–17 h.";
       } else if (index > 0 && dist < 0.3) {
         reason = "Même adresse qu'un arrêt déjà sur la tournée.";
       } else if (appel.type === "reactif") {
@@ -698,6 +773,7 @@ export function solveVrp(input: SolveInput): SolveResult {
       returnDriveMin,
       returnDriveKm,
       finishMin: Math.round(time + returnDriveMin),
+      departMin: route.depart || dayStart[route.tech],
       withinWindow: time + at(matrix.minutes, size, prev, depot) <= end,
     };
   };
@@ -765,6 +841,7 @@ export function solveVrp(input: SolveInput): SolveResult {
       returnDriveMin: route.returnDriveMin,
       returnDriveKm: route.returnDriveKm,
       finishMin: route.finishMin,
+      departMin: route.departMin,
     })),
     })),
     unassigned,

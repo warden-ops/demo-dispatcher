@@ -43,7 +43,7 @@ export async function planDispatch(input: {
     if (!point) {
       missing.push({
         appel,
-        reason: "Adresse sans coordonnées exploitables.",
+        reason: "Adresse à valider",
       });
       continue;
     }
@@ -56,7 +56,7 @@ export async function planDispatch(input: {
   const matrix = await buildTravelMatrix(points, {
     env,
     fetchImpl,
-    budgetMs: 1_200,
+    budgetMs: 8_000,
     now: travelStarted,
   });
   const travelMs = Date.now() - travelStarted;
