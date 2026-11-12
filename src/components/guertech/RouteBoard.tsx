@@ -36,6 +36,7 @@ type RouteBoardProps = {
   unassigned?: Unassigned[];
   remoteTrips?: RemoteTrip[];
   planSummary?: string;
+  planWarning?: string;
 };
 
 export function RouteBoard({
@@ -60,6 +61,7 @@ export function RouteBoard({
   unassigned = [],
   remoteTrips = [],
   planSummary,
+  planWarning,
 }: RouteBoardProps) {
   const withWork = routes.filter((route) => route.stops.length > 0);
   const [techId, setTechId] = useState(routes[0]?.tech.id ?? "");
@@ -220,7 +222,31 @@ export function RouteBoard({
           ))}
         </div>
       ) : null}
+      {planWarning ? (
+        <p className="gt-travel-warning" role="status">
+          {planWarning}
+        </p>
+      ) : null}
       {planSummary ? <p className="gt-share-hint">{planSummary}</p> : null}
+      {routes.some((route) =>
+        route.stops.some((stop) => stop.reason?.startsWith("RDV à replanifier")),
+      ) ? (
+        <p className="gt-replan-note">
+          RDV à replanifier :{" "}
+          {
+            routes.reduce(
+              (count, route) =>
+                count +
+                route.stops.filter((stop) =>
+                  stop.reason?.startsWith("RDV à replanifier"),
+                ).length,
+              0,
+            )
+          }{" "}
+          rendez-vous passés, remis au premier créneau libre. Ce ne sont plus des
+          heures fixes.
+        </p>
+      ) : null}
 
       {view === "calendar" ? (
         <>

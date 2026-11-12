@@ -447,6 +447,71 @@ describe("optimiseur de tournées", () => {
     );
     for (const id of ["OT1", "OT2", "OT3"]) assert.equal(served.has(id), true, id);
   });
+
+  it("ne fige pas un rendez-vous passé sur le premier jour", () => {
+    const result = solve(
+      [
+        call({
+          id: "PAST1",
+          ville: "Saint-Jean-sur-Richelieu",
+          planifie: true,
+          heure: "08:00",
+          techId: "1",
+          scheduledOn: "2026-05-12",
+        }),
+        call({
+          id: "PAST2",
+          ville: "Saint-Hyacinthe",
+          planifie: true,
+          heure: "08:00",
+          techId: "1",
+          scheduledOn: "2026-11-02",
+        }),
+        call({
+          id: "FUTURE",
+          ville: "Drummondville",
+          planifie: true,
+          heure: "11:00",
+          techId: "2",
+          scheduledOn: "2026-11-13",
+        }),
+        call({
+          id: "LATER",
+          ville: "Nicolet",
+          planifie: true,
+          heure: "10:00",
+          techId: "2",
+          scheduledOn: "2026-12-01",
+        }),
+      ],
+      [tech("1"), tech("2")],
+      { pmQuotaPerDay: 0, horizonDays: 3, startDate: "2026-11-11" },
+    );
+    const placed = result.days.flatMap((day) =>
+      day.routes.flatMap((route) =>
+        route.stops.map((stop) => ({
+          id: stop.appel.id,
+          date: day.date,
+          reason: stop.reason,
+          tech: route.techId,
+        })),
+      ),
+    );
+    const past = placed.filter((item) => item.id === "PAST1" || item.id === "PAST2");
+    assert.equal(past.length, 2);
+    assert.ok(past.every((item) => item.reason?.startsWith("RDV à replanifier")));
+    const future = placed.find((item) => item.id === "FUTURE");
+    assert.equal(future?.date, "2026-11-13");
+    assert.equal(future?.tech, "2");
+    assert.equal(
+      placed.some((item) => item.id === "LATER"),
+      false,
+    );
+    assert.match(
+      result.unassigned.find((item) => item.appel.id === "LATER")?.reason ?? "",
+      /hors de cet horizon/,
+    );
+  });
 });
 
 describe("repli d'adresse", () => {

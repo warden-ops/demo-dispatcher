@@ -41,7 +41,26 @@ describe("mapping SuiteQL", () => {
     assert.equal(appel.heure, "08:30");
     assert.equal(appel.techId, "55");
     assert.equal(appel.planifie, true);
+    assert.equal(appel.scheduledOn, undefined);
     assert.match(appel.magasin, /CS8001/);
+  });
+
+  it("garde la date de tâche à part de l'ouverture du cas", () => {
+    const appel = mapAppelRow({
+      task_id: "42",
+      case_id: "43",
+      case_type: "7",
+      site: "Site",
+      address: "450 rue Brock, Drummondville, QC",
+      asset: "Espresso",
+      tech_id: "9",
+      start_time: "08:00",
+      start_date: "2026-05-12",
+      opened_at: "2026-04-01",
+    });
+    assert.equal(appel?.scheduledOn, "2026-05-12");
+    assert.equal(appel?.openedAt, "2026-04-01");
+    assert.equal(appel?.planifie, true);
   });
 
   it("classe le type 7 en réactif et ignore les autres types", () => {

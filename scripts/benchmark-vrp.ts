@@ -289,6 +289,129 @@ const remoteAreas = optimized.remoteTrips
   )
   .join("\n");
 
+function countReasons(result: SolveResult): string {
+  const reasons = new Map<string, number>();
+  for (const item of result.unassigned) {
+    reasons.set(item.reason, (reasons.get(item.reason) ?? 0) + 1);
+  }
+  return [...reasons.entries()].map(([reason, count]) => `${count} × ${reason}`).join(" ; ") || "—";
+}
+
+function capacityLine(result: SolveResult, techCount: number): string {
+  const used = result.days.reduce((sum, day) => sum + day.routes.length, 0);
+  const spare = result.days.reduce(
+    (sum, day) =>
+      sum + day.routes.reduce((inner, route) => inner + Math.max(0, 17 * 60 - route.finishMin), 0),
+    0,
+  );
+  const empty = techCount * result.days.length - used;
+  const replan = result.days.reduce(
+    (sum, day) =>
+      sum +
+      day.routes.reduce(
+        (inner, route) =>
+          inner + route.stops.filter((stop) => stop.reason?.startsWith("RDV à replanifier")).length,
+        0,
+      ),
+    0,
+  );
+  return `${used} journées occupées, ${empty} vides, ${spare} min libres au total, ${replan} RDV à replanifier`;
+}
+
+const pastCalls: Appel[] = [];
+const pastTechs: Tech[] = [1, 2, 3, 4].map((id) => ({
+  id: String(id),
+  name: `Tech ${id}`,
+  present: true,
+  start: DRUMMONDVILLE_HQ,
+  end: DRUMMONDVILLE_HQ,
+  startHour: "08:00",
+  endHour: "17:00",
+  hours: 9,
+  region: "",
+  skills: [...ALL_SKILL_IDS],
+}));
+for (let index = 0; index < 12; index += 1) {
+  const city = cityFromText(index % 2 === 0 ? "Saint-Jean-sur-Richelieu" : "Drummondville");
+  if (!city) throw new Error("ville");
+  pastCalls.push({
+    id: `P${index}`,
+    type: "preventif",
+    magasin: `Passé ${index}`,
+    adresse: city.name,
+    ville: city.name,
+    region: city.region,
+    lat: city.lat,
+    lng: city.lng,
+    equipement: "Espresso",
+    equipementId: 2,
+    netsuiteId: `P${index}`,
+    planifie: true,
+    heure: "08:00",
+    techId: "1",
+    openedAt: "2026-04-01",
+    scheduledOn: `2026-0${5 + (index % 4)}-10`,
+  });
+}
+pastCalls.push({
+  ...pastCalls[0],
+  id: "FUT",
+  magasin: "Futur",
+  heure: "11:00",
+  techId: "2",
+  scheduledOn: "2026-11-13",
+  ville: "Drummondville",
+  lat: 45.883,
+  lng: -72.484,
+});
+for (let index = 0; index < 24; index += 1) {
+  pastCalls.push({
+    ...pastCalls[0],
+    id: `L${index}`,
+    magasin: `Local ${index}`,
+    planifie: false,
+    heure: "",
+    techId: "",
+    scheduledOn: undefined,
+    ville: "Drummondville",
+    lat: 45.88 + (index % 6) * 0.01,
+    lng: -72.49,
+    openedAt: "2026-09-01",
+  });
+}
+const pastPoints = [
+  ...pastCalls.map((appel) => ({ lat: appel.lat ?? 0, lng: appel.lng ?? 0 })),
+  ...pastTechs.map(() => DEPOT),
+];
+const pastMatrix = haversineMatrix(pastPoints);
+const pastBefore = solveVrp({
+  calls: pastCalls.map((appel) => ({ ...appel, scheduledOn: undefined })),
+  techs: pastTechs,
+  matrix: pastMatrix,
+  startDate: "2026-11-12",
+  horizonDays: 5,
+  pmQuotaPerDay: 40,
+  budgetMs: 700,
+});
+const pastAfter = solveVrp({
+  calls: pastCalls,
+  techs: pastTechs,
+  matrix: pastMatrix,
+  startDate: "2026-11-12",
+  horizonDays: 5,
+  pmQuotaPerDay: 40,
+  budgetMs: 700,
+});
+const pastTable = `| | Avant (tout sur le jour 1) | Après (passé = flexible) |
+| --- | --- | --- |
+| Appels placés | ${pastBefore.stats.served} | ${pastAfter.stats.served} |
+| Non placés | ${pastBefore.unassigned.length} | ${pastAfter.unassigned.length} |
+| Raisons | ${countReasons(pastBefore)} | ${countReasons(pastAfter)} |
+| Capacité | ${capacityLine(pastBefore, pastTechs.length)} | ${capacityLine(pastAfter, pastTechs.length)} |
+
+Le retour au dépôt n'est pas compté deux fois : un arrêt seul finit à départ + trajet + durée sur place + retour, et ce total est le même test que « la journée vide peut-elle accueillir cet appel ». Avec un quota de 40 préventifs par jour, les appels restants sont refusés parce que les journées sont pleines ou que le quota est déjà pris, pas parce que le retour est ajouté en double.
+`;
+
 const markdown = `# Benchmark de l'optimiseur de tournées
 
 Jeu synthétique, graine fixe : 300 appels, 14 techniciens sans zone, départ et retour au dépôt (1000 rue Cormier, Drummondville). Horizon du ${days[0]} au ${days[days.length - 1]} (${HORIZON} jours ouvrables). Quota de 60 préventifs par jour. Temps de route : repli autoroute (court trajet lent, long trajet ~100 km/h), la même matrice pour les deux méthodes.
@@ -321,6 +444,10 @@ Le calcul de 300 × 14 reste sous 3 s (${optimizerMs} ms ici, budget de recherch
 Même optimiseur, deux matrices. « Avant » : vol d'oiseau × 1,3 à 72 km/h (le repli qui envoyait Ottawa en nuitée). « Après » : repli autoroute. 4 techniciens sans zone, horizon 5 jours, quota 40. Comprend Ottawa/Gatineau, Baie-Saint-Paul, Rivière-du-Loup, Saguenay, des rendez-vous fixes et Sault Ste. Marie.
 
 ${shapedTable}
+
+## Rendez-vous passés
+
+${pastTable}
 `;
 
 const output = "docs/optimiseur-benchmark.md";
