@@ -13,6 +13,7 @@ import {
   taskRecordBody,
 } from "./dispatch";
 import {
+  countExclusions,
   mapAppelRows,
   mapCustomerRows,
   mapItemRows,
@@ -72,13 +73,12 @@ export async function readAppelsResponse(
   }
   try {
     const api = clientOrCreate(env, client);
-    const appels = await cachedRead("appels", async () =>
-      mapAppelRows(
-        await suiteqlFirstWorking(api, [APPELS_SUITEQL, APPELS_SUITEQL_TEXT]),
-      ),
-    );
+    const { appels, exclus } = await cachedRead("appels", async () => {
+      const rows = await suiteqlFirstWorking(api, [APPELS_SUITEQL, APPELS_SUITEQL_TEXT]);
+      return { appels: mapAppelRows(rows), exclus: countExclusions(rows) };
+    });
     const located = await geocodeAppels(appels, env);
-    return { status: 200, body: { demo: false, appels: located } };
+    return { status: 200, body: { demo: false, appels: located, exclus } };
   } catch (error) {
     return { status: 502, body: { error: publicMessage(error) } };
   }
