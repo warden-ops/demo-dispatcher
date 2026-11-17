@@ -1,0 +1,51 @@
+--- a/sync_prod_to_sandbox.py	2026-11-17 14:26:26.671779722 -0500
++++ b/sync_prod_to_sandbox.py	2026-11-17 14:26:26.679779705 -0500
+@@ -121,6 +121,7 @@
+  TO_CHAR(s.custevent_nx_end_date,'YYYY-MM-DD') AS nx_ed, TO_CHAR(s.custevent_nx_end_time,'HH24:MI') AS nx_et,
+  s.custevent_nx_time_zone AS tz, s.custevent_nxc_service_report_language AS lang, s.custevent_nxc_cust_name_to_contractor AS cust_contractor,
+  s.custevent_nx_case_details AS details, s.custevent_nx_case_purchaseorder AS po, s.custevent_nx_customer_name AS cust_name, s.phone,
++ s.custevent_nxc_subcontractor_case AS subcase, s.custevent_nx_assets AS assets,
+  TO_CHAR(s.datecreated,'YYYY-MM-DD HH24:MI') AS created, TO_CHAR(s.lastmodifieddate,'YYYY-MM-DD HH24:MI:SS') AS modified
+ FROM supportcase s WHERE {where} ORDER BY s.lastmodifieddate, s.id"""
+ TASK_SQL = """SELECT t.id, t.title, t.supportcase, t.company, t.custevent_nx_customer AS cust, t.custevent_nx_task_type AS ttype,
+@@ -134,6 +135,7 @@
+ FROM task t WHERE {where} ORDER BY t.lastmodifieddate, t.id"""
+ 
+ def ids_in(ids): return ','.join(str(int(i)) for i in ids)
++def multi(v): return [x.strip() for x in str(v).split(',') if x.strip()] if v not in (None, '') else []
+ def ref(v): return {'id': str(v)} if v not in (None, '') else None
+ def num(v):
+     try: return float(v)
+@@ -195,7 +197,7 @@
+     def resolve_links(self, cases, tasks):
+         custs = {c[k] for c in cases for k in ('company', 'cust', 'owner_eq')} | {t[k] for t in tasks for k in ('company', 'cust')}
+         emps = {c['assigned'] for c in cases} | {t['assigned'] for t in tasks}
+-        assets = {c['asset'] for c in cases} | {t['asset'] for t in tasks}
++        assets = {c['asset'] for c in cases} | {t['asset'] for t in tasks} | {x for c in cases for x in multi(c['assets'])}
+         ok_c1, src_c1 = self.check_same('customer', 'entityid', custs)   # client
+         ok_c2, src_c2 = self.check_same('job', 'entityid', {c for c in custs if str(c) not in src_c1})   # projet (site FSM = job)
+         ok_c, src_c = ok_c1 | ok_c2, {**src_c2, **src_c1}
+@@ -267,7 +269,11 @@
+              'custevent_nx_end_date': c['nx_ed'], 'custevent_nx_end_time': c['nx_et'],
+              'custevent_nx_case_details': (f"[Synchro prod {c['casenumber']} id {c['id']}]\n" + (c['details'] or ''))[:3900],
+              'custevent_nx_case_purchaseorder': c['po'], 'custevent_nx_customer_name': c['cust_name'], 'phone': c['phone'],
++             # cas sous-traite: le planificateur exclut ces taches (sinon 35274 ressemble a "non affecte")
++             'custevent_nxc_subcontractor_case': c['subcase'] == 'T',
+              'internalOnly': True, 'emailForm': False, 'messageNew': False}
++        eq = [{'id': x} for x in multi(c['assets']) if x in self.asset_ok]
++        if eq: b['custevent_nx_assets'] = {'items': eq}   # equipement de l'appel (apercu du planificateur)
+         if self.a.source == 'prod' and not self.a.placeholder_techs and c['assigned'] and str(c['assigned']) in self.emp_ok:
+             b['assigned'] = {'id': str(c['assigned'])}
+         return {k: v for k, v in b.items() if v not in (None, '')}
+@@ -346,6 +352,11 @@
+         if not self.a.execute:
+             self.log(action='simulation', type=table, eid=e, sandbox_id=sid, operation='maj' if sid else 'creation'); return sid
+         w = self.sb.request('PUT', f'/services/rest/record/v1/{rtype}/eid:{e}', body)
++        if w.status_code not in (200, 204) and 'custevent_nx_assets' in body:
++            # champ multi-selection refuse: on n'empeche pas la copie du cas pour autant
++            self.log(niveau='avis', msg='equipements refuses, nouvel essai sans', eid=e, code=w.status_code, detail=w.text[:200])
++            body = {k: v for k, v in body.items() if k != 'custevent_nx_assets'}
++            w = self.sb.request('PUT', f'/services/rest/record/v1/{rtype}/eid:{e}', body)
+         if w.status_code not in (200, 204):
+             self.stats['erreurs'] += 1; self.log(niveau='erreur', type=table, eid=e, code=w.status_code, detail=w.text[:400]); return sid
+         created = sid is None

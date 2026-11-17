@@ -16,8 +16,55 @@ import {
 
 export { normalizeLookup, villeFromAddress };
 
-/** Files d'attente, pas des techniciens sur la route. */
+/**
+ * Comptes génériques, pas des techniciens sur la route :
+ * 35274 « Technicien Guertech », 228238 « Technicien Laval ».
+ * La synchro prod vers sandbox met 35274 quand la tâche prod n'a personne
+ * (Assigned est obligatoire à l'écriture), d'où la règle ci-dessous.
+ */
 export const PLACEHOLDER_TECH_IDS = new Set(["35274", "228238"]);
+
+export type TaskExclusion = "sous-traitant" | "atelier";
+
+/**
+ * Règle « tâche non affectée » (vérifiée sur la prod le 2026-11-17) :
+ * - cas sous-traité (case à cocher Subcontractor case ou sous-traitant FSM
+ *   renseigné) : la tâche est donnée à un sous-traitant, on l'exclut ;
+ * - client « Atelier » (production interne) : exclu ;
+ * - sinon, personne ou un compte générique : non affectée, à planifier ;
+ * - sinon, un vrai technicien Guertech : rendez-vous déjà attribué (fixe).
+ */
+export function classifyTaskRow(row: Record<string, unknown>): TaskExclusion | null {
+  const flag = cell(row, "subcontractor_case").toUpperCase();
+  if (flag === "T" || flag === "TRUE" || plainId(cell(row, "subcontractor_id"))) {
+    return "sous-traitant";
+  }
+  if (isAtelierCustomer(cell(row, "customer"), cell(row, "site"))) return "atelier";
+  return null;
+}
+
+export function isAtelierCustomer(customer: string, site: string): boolean {
+  if (normalizeLookup(customer) === "atelier") return true;
+  return /(^|\s)atelier\s*\|\s*site\s*$/i.test(site.trim());
+}
+
+/** Texte brut du champ Détails (NetSuite renvoie du HTML léger). */
+export function cleanDetails(value: string): string {
+  return value
+    .replace(/^\[Synchro prod[^\]]*\]\s*/i, "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/\r/g, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{2,}/g, "\n")
+    .trim();
+}
 
 export const TECH_DEPARTMENTS = [
   "Technique",
@@ -111,6 +158,7 @@ export function mapAppelRow(row: Record<string, unknown>): Appel | null {
   const taskId = plainId(cell(row, "task_id"));
   const type = caseType(cell(row, "case_type"));
   if (!/^\d+$/.test(taskId) || !type) return null;
+  if (classifyTaskRow(row)) return null;
 
   const caseId = plainId(cell(row, "case_id"));
   const caseNumber = cell(row, "casenumber");
@@ -153,11 +201,16 @@ export function mapAppelRow(row: Record<string, unknown>): Appel | null {
   const heure = normalizeHeure(cell(row, "start_time"));
   const scheduledOn = cell(row, "start_date");
   const openedAt = cell(row, "opened_at") || scheduledOn;
+  const title = cell(row, "task_title");
+  const equipementDetail = cell(row, "equipment").replace(/\s*\|\s*/g, " · ");
+  const details = cleanDetails(cell(row, "details"));
+  const statutCas = cell(row, "case_status");
+  const priorite = cell(row, "priority_label");
 
   return {
     id: taskId,
     type,
-    magasin: caseNumber ? `${caseNumber} · ${site}` : site,
+    magasin: title || (caseNumber ? `${caseNumber} · ${site}` : site),
     adresse: address,
     ville,
     region: deriveRegion({ ville, province, postal }),
@@ -170,7 +223,28 @@ export function mapAppelRow(row: Record<string, unknown>): Appel | null {
     techId,
     openedAt,
     ...(scheduledOn ? { scheduledOn } : {}),
+    ...(caseNumber ? { numeroCas: caseNumber } : {}),
+    site,
+    ...(statutCas ? { statutCas } : {}),
+    ...(priorite ? { priorite } : {}),
+    ...(equipementDetail ? { equipementDetail } : {}),
+    ...(details ? { details } : {}),
   };
+}
+
+export type AppelExclusions = Record<TaskExclusion, number>;
+
+export function countExclusions(rows: Record<string, unknown>[]): AppelExclusions {
+  const counts: AppelExclusions = { "sous-traitant": 0, atelier: 0 };
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const id = plainId(cell(row, "task_id"));
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const reason = classifyTaskRow(row);
+    if (reason) counts[reason] += 1;
+  }
+  return counts;
 }
 
 export function mapAppelRows(rows: Record<string, unknown>[]): Appel[] {

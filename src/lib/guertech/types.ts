@@ -20,6 +20,15 @@ export type Appel = {
   openedAt: string;
   /** Date du rendez-vous déjà posé dans NetSuite (tâche), si elle existe. */
   scheduledOn?: string;
+  /** Aperçu NetSuite (tâche et cas), absent en mode démo. */
+  numeroCas?: string;
+  site?: string;
+  statutCas?: string;
+  priorite?: string;
+  /** Équipement de l'appel de service (champ Équipements du cas). */
+  equipementDetail?: string;
+  /** Détail de l'appel (champ Détails du cas). */
+  details?: string;
 };
 
 export type Tech = {

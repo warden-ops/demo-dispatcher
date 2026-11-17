@@ -695,7 +695,110 @@
   color: var(--gt-navy);
 }
 
+.gt-call-body {
+  min-width: 0;
+}
+
+.gt-call-preview {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.gt-call-tags {
+  margin-bottom: 0.35rem;
+}
+
+.gt-call h3.gt-call-title {
+  font-size: 1rem;
+  font-weight: 750;
+  color: var(--gt-navy);
+  line-height: 1.25;
+}
+
+.gt-call p.gt-call-case {
+  margin: 0.1rem 0 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #5a6b87;
+}
+
+.gt-call p.gt-call-meta {
+  margin-top: 0.35rem;
+}
+
+.gt-dot {
+  margin: 0 0.4rem;
+  color: #a0a8b8;
+}
+
+.gt-call-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--gt-line);
+  border-bottom: 1px solid var(--gt-line);
+}
+
+.gt-call-grid > div {
+  padding: 0 0.6rem;
+  border-left: 1px solid var(--gt-line);
+  min-width: 0;
+}
+
+.gt-call-grid > div:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.gt-call-grid dt,
+.gt-call-details dt {
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--gt-ink, #1d2433);
+}
+
+.gt-call-grid dd {
+  margin: 0.2rem 0 0;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.gt-pill {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: #e6e9ef;
+  color: #2f3a4f;
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+
+.gt-pill.prio-p1,
+.gt-pill.prio-p2 {
+  background: rgba(155, 44, 44, 0.12);
+  color: var(--gt-reactif);
+}
+
+.gt-call-details {
+  margin: 0.45rem 0 0;
+}
+
+.gt-call-details dd {
+  margin: 0.15rem 0 0;
+  font-size: 0.85rem;
+  color: var(--gt-ink, #1d2433);
+  white-space: pre-line;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .gt-call-actions {
+  align-self: start;
   display: grid;
   gap: 0.35rem;
   justify-items: end;

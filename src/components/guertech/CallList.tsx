@@ -17,6 +17,15 @@ type CallListProps = {
   onCalendarIds?: Set<string>;
 };
 
+/** Adresse NetSuite sur une ligne, sans « Canada » final. */
+export function oneLineAddress(value: string): string {
+  return value
+    .split(/\r?\n/)
+    .map((part) => part.trim())
+    .filter((part) => part && !/^canada$/i.test(part))
+    .join(", ");
+}
+
 function CallCard({
   appel,
   techs,
@@ -30,23 +39,42 @@ function CallCard({
   onUpdate: (id: string, patch: Partial<Appel>) => void;
   onCalendar?: boolean;
 }) {
+  const address = oneLineAddress(appel.adresse);
+  const hasPreview = Boolean(
+    appel.numeroCas ||
+    appel.statutCas ||
+    appel.priorite ||
+    appel.equipementDetail ||
+    appel.details,
+  );
   return (
     <article className={`gt-call${overdue ? " gt-call-overdue" : ""}`}>
-      <div>
-        <h3>
+      <div className="gt-call-body">
+        <div className="gt-call-tags">
           <span className={`gt-tag ${appel.type}`}>
             {appel.type === "preventif" ? "Préventif" : "Réactif"}
           </span>
-          {overdue ? <span className="gt-tag overdue">Délai dépassé</span> : null}
+          {overdue ? (
+            <span className="gt-tag overdue">Délai dépassé</span>
+          ) : null}
           {appel.planifie ? (
             <span className="gt-tag pin">Planifié {appel.heure}</span>
           ) : null}
           {onCalendar ? <span className="gt-tag pin">Calendrier</span> : null}
-          {appel.magasin}
-        </h3>
-        <p>
-          {appel.adresse} · {appel.equipement} · {appel.netsuiteId}
-          {appel.type === "reactif" ? ` · ouvert ${appel.openedAt}` : ""}
+        </div>
+        <h3 className="gt-call-title">{appel.magasin}</h3>
+        {appel.numeroCas ? (
+          <p className="gt-call-case">{appel.numeroCas}</p>
+        ) : null}
+        <p className="gt-call-meta">
+          <span aria-hidden="true">📍</span> {address}
+          <span className="gt-dot">•</span>
+          {appel.equipement} - {appel.netsuiteId}
+          {appel.openedAt ? (
+            <>
+              <span className="gt-dot">•</span>Ouvert le {appel.openedAt}
+            </>
+          ) : null}
         </p>
       </div>
       <div className="gt-call-actions">
@@ -118,6 +146,46 @@ function CallCard({
           </>
         ) : null}
       </div>
+      {hasPreview ? (
+        <div className="gt-call-preview">
+          <dl className="gt-call-grid">
+            <div>
+              <dt>Équipement</dt>
+              <dd>{appel.equipementDetail || "Non précisé"}</dd>
+            </div>
+            <div>
+              <dt>Statut du cas</dt>
+              <dd>
+                {appel.statutCas ? (
+                  <span className="gt-pill">{appel.statutCas}</span>
+                ) : (
+                  "Non précisé"
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt>Priorité</dt>
+              <dd>
+                {appel.priorite ? (
+                  <span
+                    className={`gt-pill prio-${appel.priorite.toLowerCase()}`}
+                  >
+                    {appel.priorite}
+                  </span>
+                ) : (
+                  "Non précisée"
+                )}
+              </dd>
+            </div>
+          </dl>
+          {appel.details ? (
+            <dl className="gt-call-details">
+              <dt>Détail de l&apos;appel</dt>
+              <dd title={appel.details}>{appel.details}</dd>
+            </dl>
+          ) : null}
+        </div>
+      ) : null}
     </article>
   );
 }
@@ -140,22 +208,22 @@ export function CallList({
   const filtered = calls.filter((appel) => {
     if (filter === "preventif" && appel.type !== "preventif") return false;
     if (filter === "reactif" && appel.type !== "reactif") return false;
-    if (filter === "overdue" && !isReactifOverdue(appel, asOfDate)) return false;
+    if (filter === "overdue" && !isReactifOverdue(appel, asOfDate))
+      return false;
     if (plannedOnly && !appel.planifie) return false;
     if (!query) return true;
     return (
       appel.magasin.toLowerCase().includes(query) ||
+      (appel.numeroCas ?? "").toLowerCase().includes(query) ||
+      (appel.site ?? "").toLowerCase().includes(query) ||
       appel.adresse.toLowerCase().includes(query) ||
       appel.netsuiteId.toLowerCase().includes(query)
     );
   });
 
-  const overdue = filtered.filter((appel) =>
-    isReactifOverdue(appel, asOfDate),
-  );
+  const overdue = filtered.filter((appel) => isReactifOverdue(appel, asOfDate));
   const reactifPending = filtered.filter(
-    (appel) =>
-      appel.type === "reactif" && !isReactifOverdue(appel, asOfDate),
+    (appel) => appel.type === "reactif" && !isReactifOverdue(appel, asOfDate),
   );
   const preventif = filtered.filter((appel) => appel.type === "preventif");
 
@@ -223,13 +291,16 @@ export function CallList({
           className={filter === "overdue" ? "on" : ""}
           onClick={() => onFilter("overdue")}
         >
-          Délai dépassé ({overdue.length || calls.filter((c) => isReactifOverdue(c, asOfDate)).length})
+          Délai dépassé (
+          {overdue.length ||
+            calls.filter((c) => isReactifOverdue(c, asOfDate)).length}
+          )
         </button>
       </div>
       <div className="gt-row">
         <input
           className="gt-search"
-          placeholder="Rechercher magasin, adresse, NS…"
+          placeholder="Rechercher tâche, cas, adresse, NS…"
           value={search}
           onChange={(event) => onSearch(event.target.value)}
         />
@@ -254,7 +325,9 @@ export function CallList({
                 {section.title} <span>({section.items.length})</span>
               </h3>
               {section.items.length === 0 ? (
-                <p className="gt-section-empty">Aucun appel dans cette section.</p>
+                <p className="gt-section-empty">
+                  Aucun appel dans cette section.
+                </p>
               ) : (
                 shown.map((appel) => (
                   <CallCard

@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ALL_SKILL_IDS } from "../guertech/constants";
 import {
+  classifyTaskRow,
+  cleanDetails,
+  countExclusions,
   mapAppelRow,
   mapAppelRows,
   mapCustomerRows,
@@ -182,6 +185,59 @@ describe("mapping SuiteQL", () => {
       villeFromAddress("820 boulevard Saint-Joseph, Victoriaville, QC"),
       "Victoriaville",
     );
+  });
+
+  it("garde seulement les tâches Sur place, copies prod ou rafraichissement", () => {
+    assert.match(APPELS_SUITEQL, /custevent_nx_task_type = 3/);
+    assert.match(APPELS_SUITEQL, /t\.externalid IS NULL AND t\.id <= 567179/);
+    assert.match(APPELS_SUITEQL_TEXT, /custevent_nxc_subcontractor_case/);
+    assert.match(APPELS_SUITEQL_TEXT, /t\.title AS task_title/);
+    assert.equal(APPELS_SUITEQL_TEXT.includes("{JOINS}"), false);
+  });
+
+  it("exclut les tâches sous-traitées et le client Atelier", () => {
+    const base = { task_id: "1", case_id: "2", case_type: "7", address: "1 rue A, Granby QC" };
+    const sub = { ...base, tech_id: "35274", subcontractor_case: "T" };
+    const vendor = { ...base, task_id: "3", tech_id: "35274", subcontractor_case: "F", subcontractor_id: "991" };
+    const atelier = { ...base, task_id: "4", customer: "Atelier", site: "Appel de service 66386 Atelier | Site" };
+    const free = { ...base, task_id: "5", tech_id: "35274", subcontractor_case: "F" };
+    const nobody = { ...base, task_id: "6" };
+    const pinned = { ...base, task_id: "7", tech_id: "124", start_time: "09:00" };
+    assert.equal(classifyTaskRow(sub), "sous-traitant");
+    assert.equal(classifyTaskRow(vendor), "sous-traitant");
+    assert.equal(classifyTaskRow(atelier), "atelier");
+    assert.equal(mapAppelRow(sub), null);
+    assert.equal(mapAppelRow(atelier), null);
+    const kept = mapAppelRows([sub, vendor, atelier, free, nobody, pinned]);
+    assert.deepEqual(kept.map((a) => [a.id, a.planifie]), [["5", false], ["6", false], ["7", true]]);
+    assert.deepEqual(countExclusions([sub, vendor, atelier, free]), { "sous-traitant": 2, atelier: 1 });
+  });
+
+  it("remplit l'aperçu de la tâche (titre, cas, équipement, statut, priorité, détail)", () => {
+    const appel = mapAppelRow({
+      task_id: "566756",
+      task_title: "Sur place 566756 COUCHE-TARD INC - LAVAL : CT734 | Site",
+      case_id: "563834",
+      casenumber: "CASE18495",
+      case_type: "7",
+      case_status: "À Finaliser",
+      priority_label: "P2",
+      equipment: "Espresso | BW3 | BW136262",
+      details: "[Synchro prod CASE18495 id 563834]\n09/11 RECALL : Impossible<br><br>L'unité affiche un défaut",
+      site: "Billable 473047 COUCHE-TARD INC - LAVAL : CT734 | Site",
+      address: "223 Rue Saint-Hubert\nGRANBY QC J2G 5M9",
+      tech_id: "35274",
+      opened_at: "2026-11-03",
+    });
+    assert.ok(appel);
+    assert.equal(appel.magasin, "Sur place 566756 COUCHE-TARD INC - LAVAL : CT734 | Site");
+    assert.equal(appel.numeroCas, "CASE18495");
+    assert.equal(appel.statutCas, "À Finaliser");
+    assert.equal(appel.priorite, "P2");
+    assert.equal(appel.equipementDetail, "Espresso · BW3 · BW136262");
+    assert.equal(appel.details, "09/11 RECALL : Impossible\nL'unité affiche un défaut");
+    assert.equal(appel.planifie, false);
+    assert.equal(cleanDetails("a &amp; b<br/>c"), "a & b\nc");
   });
 
   it("garde le filtre des copies prod dans la requête d'appels", () => {
