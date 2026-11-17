@@ -65,8 +65,13 @@ export const TIME_SLOTS = Array.from({ length: 23 }, (_, index) => {
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 });
 
+/**
+ * Durées sur place par défaut : médianes des blocs planifiés dans NetSuite
+ * (tâches « Sur place » terminées, 12 mois : 8 492 réactifs, 1 040 préventifs).
+ * Voir tech-profiles.data.ts. Le répartiteur peut toujours les changer.
+ */
 export const DEFAULT_DURATIONS = {
-  reactif: 90,
+  reactif: 120,
   preventif: 60,
 };
 

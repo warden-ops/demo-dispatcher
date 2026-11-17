@@ -9,6 +9,7 @@ import {
 import { SLA } from "./constants";
 import { ROAD_WINDOW } from "./optimize";
 import type { TravelMatrix } from "./travel";
+import { nearestAnchor, zoneSoftPenalty, type ProfileMap } from "./tech-profiles";
 import type { Appel, RemoteTrip, Tech, Unassigned } from "./types";
 
 const REMOTE_CLUSTER_MIN = 240;
@@ -69,6 +70,10 @@ export type SolveInput = {
   allowOvertime?: boolean;
   moveAssigned?: boolean;
   budgetMs?: number;
+  /** Secteurs habituels par technicien (pénalité douce). Absent : aucune pénalité. */
+  profiles?: ProfileMap;
+  /** Techniciens gardés seulement pour les rendez-vous qui leur sont déjà attribués. */
+  pinOnlyTechIds?: string[];
 };
 
 type MutableRoute = {
@@ -228,8 +233,25 @@ export function solveVrp(input: SolveInput): SolveResult {
     if (callRegion[call] === 0) return true;
     return techRegion[tech] === callRegion[call];
   };
+  const pinOnly = new Uint8Array(techCount);
+  for (const id of input.pinOnlyTechIds ?? []) {
+    const index = techById.get(id);
+    if (index != null) pinOnly[index] = 1;
+  }
+  const softZone = new Float32Array(techCount * callCount);
+  if (input.profiles) {
+    for (let tech = 0; tech < techCount; tech += 1) {
+      const profile = input.profiles[techs[tech].id];
+      if (!profile) continue;
+      for (let call = 0; call < callCount; call += 1) {
+        softZone[tech * callCount + call] = zoneSoftPenalty(profile, calls[call]);
+      }
+    }
+  }
   const canTake = (tech: number, call: number): boolean =>
-    skillOk[tech * callCount + call] === 1 && zoneAllows(tech, call);
+    skillOk[tech * callCount + call] === 1 &&
+    zoneAllows(tech, call) &&
+    (pinOnly[tech] === 0 || locked[call] === tech);
 
   const remote = new Uint8Array(callCount);
   for (let call = 0; call < callCount; call += 1) {
@@ -394,6 +416,7 @@ export function solveVrp(input: SolveInput): SolveResult {
     }
     let placedTech = false;
     for (let tech = 0; tech < techCount; tech += 1) {
+      if (pinOnly[tech]) continue;
       if (placeTimedPin(pin.index, tech, day)) {
         placedTech = true;
         break;
@@ -414,9 +437,10 @@ export function solveVrp(input: SolveInput): SolveResult {
   };
 
   const zonePenalty = (tech: number, call: number): number => {
+    const soft = softZone[tech * callCount + call];
     const region = callRegion[call];
-    if (region === 0 || !covered[region]) return 0;
-    return techRegion[tech] === region ? 0 : ZONE_PENALTY_MIN;
+    if (region === 0 || !covered[region]) return soft;
+    return soft + (techRegion[tech] === region ? 0 : ZONE_PENALTY_MIN);
   };
 
   const jumpPenalty = (stops: number[]): number => {
@@ -809,6 +833,11 @@ export function solveVrp(input: SolveInput): SolveResult {
             : `Réactif à faire avant le ${formatDayLabel(due)} (SLA de 2 jours ouvrables).`;
       } else {
         reason = `Préventif à proximité (${formatKmFr(dist)} de trajet).`;
+      }
+      const profile = input.profiles?.[techs[route.tech].id];
+      const home = nearestAnchor(profile, appel);
+      if (home && home.beyondKm <= 0 && pinKind[id] !== "replan") {
+        reason = `${reason} Secteur habituel du technicien (${home.anchor.label}).`;
       }
       stops.push({
         appel: { ...appel, techId: techs[route.tech].id },

@@ -2,6 +2,7 @@ import type { EnvMap } from "../netsuite/config";
 import { geocodeAppels } from "../netsuite/geocode";
 import type { Appel, PlanStats, RemoteTrip, Tech, Unassigned } from "./types";
 import { pointForAppel, pointForStart, type LatLng } from "./territory";
+import { splitRoadTechs, TECH_PROFILES, type ProfileMap } from "./tech-profiles";
 import { buildTravelMatrix } from "./travel";
 import { solveVrp, type PlannedRoute } from "./vrp";
 
@@ -21,12 +22,22 @@ export async function planDispatch(input: {
   durations?: { preventif: number; reactif: number };
   allowOvertime?: boolean;
   moveAssigned?: boolean;
+  /** Envoyer aussi les techniciens d'atelier sur la route. */
+  includeWorkshop?: boolean;
+  /** Profils (secteurs, rôle). Par défaut : profils tirés de NetSuite. Passer {} pour les ignorer. */
+  profiles?: ProfileMap;
   env?: EnvMap;
   fetchImpl?: typeof fetch;
 }): Promise<DispatchPlan> {
   const env = input.env ?? {};
   const fetchImpl = input.fetchImpl ?? fetch;
-  const present = input.techs.filter((tech) => tech.present);
+  const profiles = input.profiles ?? TECH_PROFILES;
+  const split = splitRoadTechs(
+    input.techs.filter((tech) => tech.present),
+    input.calls,
+    { includeWorkshop: input.includeWorkshop, profiles },
+  );
+  const present = split.road;
   const geocodeStarted = Date.now();
   const geocoded = await geocodeAppels(
     input.calls,
@@ -71,6 +82,8 @@ export async function planDispatch(input: {
     allowOvertime: input.allowOvertime,
     moveAssigned: input.moveAssigned,
     budgetMs: 900,
+    profiles,
+    pinOnlyTechIds: split.pinOnly,
   });
 
   return {
@@ -82,6 +95,7 @@ export async function planDispatch(input: {
       travelMs,
       travelSource: matrix.source,
       ...(matrix.warning ? { travelWarning: matrix.warning } : {}),
+      excludedTechs: split.excluded,
     },
   };
 }
