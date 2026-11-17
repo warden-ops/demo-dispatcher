@@ -9,6 +9,7 @@ import { TechRoster } from "@/components/guertech/TechRoster";
 import {
   ALL_SKILL_IDS,
   countBusinessDays,
+  DEFAULT_DURATIONS,
   DRUMMONDVILLE_HQ,
   isReactifOverdue,
   preventifPerBusinessDay,
@@ -223,6 +224,7 @@ function Workspace() {
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [allowOvertime, setAllowOvertime] = useState<boolean | null>(null);
+  const [includeWorkshop, setIncludeWorkshop] = useState(false);
   const [overtimeWarnings, setOvertimeWarnings] = useState<OvertimeWarning[]>(
     [],
   );
@@ -997,6 +999,7 @@ function Workspace() {
             durations: dayDurations,
             allowOvertime: overtimeAllowed,
             moveAssigned: canMove,
+            includeWorkshop,
           }),
         });
         if (response.ok) {
@@ -1286,7 +1289,18 @@ function Workspace() {
                   ? `${planStats.served} arrêts tenus avant 17 h · ${formatHoursFr(planStats.driveMin)} de route · ${planStats.remoteCalls} appel(s) en voyage dédié`
                   : undefined
               }
-              planWarning={planStats?.travelWarning}
+              planWarning={
+                [
+                  planStats?.travelWarning,
+                  planStats?.excludedTechs?.length
+                    ? `Hors route (atelier ou compte en double) : ${planStats.excludedTechs
+                        .map((tech) => tech.name.split(" · ")[0])
+                        .join(", ")}`
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || undefined
+              }
               onAcceptSuggestion={acceptSuggestion}
               onRefuseSuggestion={refuseSuggestion}
               onAcceptAllSuggestions={acceptAllSuggestions}
@@ -1382,7 +1396,7 @@ function Workspace() {
               <input
                 type="number"
                 value={reactifDuration}
-                placeholder="90"
+                placeholder={String(DEFAULT_DURATIONS.reactif)}
                 onChange={(event) => setReactifDuration(event.target.value)}
               />
             </label>
@@ -1391,7 +1405,7 @@ function Workspace() {
               <input
                 type="number"
                 value={preventifDuration}
-                placeholder="60"
+                placeholder={String(DEFAULT_DURATIONS.preventif)}
                 onChange={(event) => setPreventifDuration(event.target.value)}
               />
             </label>
@@ -1409,6 +1423,14 @@ function Workspace() {
               onChange={(event) => setAllowOvertime(event.target.checked)}
             />
             Autoriser les tournées après {ROAD_WINDOW.softEndLabel}
+          </label>
+          <label className="gt-check" style={{ marginTop: "0.4rem" }}>
+            <input
+              type="checkbox"
+              checked={includeWorkshop}
+              onChange={(event) => setIncludeWorkshop(event.target.checked)}
+            />
+            Envoyer aussi les techniciens d&apos;atelier sur la route
           </label>
         </section>
       </details>

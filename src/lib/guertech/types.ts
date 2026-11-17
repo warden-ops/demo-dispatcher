@@ -99,5 +99,7 @@ export type PlanStats = {
   travelSource: "haversine" | "google" | "mixed";
   /** Présent quand Google a refusé (facturation, quota) et que le repli est utilisé. */
   travelWarning?: string;
+  /** Techniciens présents mais retirés de la route (atelier, compte en double). */
+  excludedTechs?: Array<{ id: string; name: string; reason: string }>;
   overtimeRoutes: number;
 };

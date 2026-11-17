@@ -4,6 +4,7 @@ import { addBusinessDays } from "./calendar";
 import { ALL_SKILL_IDS, DRUMMONDVILLE_HQ } from "./constants";
 import { cityFromText, DEPOT, pointForAppel, productionScenario } from "./territory";
 import type { Appel, Tech } from "./types";
+import type { ProfileMap } from "./tech-profiles";
 import { haversineMatrix } from "./travel";
 import { solveVrp } from "./vrp";
 
@@ -52,6 +53,8 @@ function solve(
     durations?: { preventif: number; reactif: number };
     moveAssigned?: boolean;
     horizonDays?: number;
+    profiles?: ProfileMap;
+    pinOnlyTechIds?: string[];
   },
 ) {
   const points = [
@@ -68,6 +71,8 @@ function solve(
     durations: extra?.durations,
     moveAssigned: extra?.moveAssigned ?? true,
     budgetMs: 700,
+    profiles: extra?.profiles,
+    pinOnlyTechIds: extra?.pinOnlyTechIds,
   });
 }
 
@@ -531,5 +536,86 @@ describe("repli d'adresse", () => {
     assert.ok(thunder && thunder.lat > 48);
     assert.ok(village && village.lat > 45 && village.lat < 46);
     assert.ok(postalOnly);
+  });
+
+  it("préfère le technicien dont c'est le secteur habituel", () => {
+    const calls = [
+      call({ id: "Q1", ville: "Lévis", type: "reactif" }),
+      call({ id: "Q2", ville: "Lévis", type: "reactif" }),
+      call({ id: "M1", ville: "Montréal", type: "reactif" }),
+      call({ id: "M2", ville: "Montréal", type: "reactif" }),
+    ];
+    const profiles: ProfileMap = {
+      mtl: {
+        role: "route",
+        visits6m: 200,
+        anchors: [{ label: "Montréal", lat: 45.5, lng: -73.6, radiusKm: 25, share: 0.9 }],
+      },
+      qc: {
+        role: "route",
+        visits6m: 200,
+        anchors: [{ label: "Québec", lat: 46.8, lng: -71.25, radiusKm: 20, share: 0.9 }],
+      },
+    };
+    const result = solve(calls, [tech("mtl"), tech("qc")], {
+      pmQuotaPerDay: 0,
+      horizonDays: 2,
+      durations: { preventif: 60, reactif: 60 },
+      profiles,
+    });
+    const owner = new Map<string, string>();
+    for (const day of result.days) {
+      for (const route of day.routes) {
+        for (const stop of route.stops) owner.set(stop.appel.id, route.techId);
+      }
+    }
+    assert.equal(owner.get("Q1"), "qc");
+    assert.equal(owner.get("Q2"), "qc");
+    assert.equal(owner.get("M1"), "mtl");
+    assert.equal(owner.get("M2"), "mtl");
+    const reasons = result.days.flatMap((day) =>
+      day.routes.flatMap((route) => route.stops.map((stop) => stop.reason)),
+    );
+    assert.ok(reasons.some((reason) => reason.includes("Secteur habituel")));
+  });
+
+  it("sans profils, aucune pénalité de secteur n'est appliquée", () => {
+    const calls = [call({ id: "Q1", ville: "Lévis", type: "reactif" })];
+    const result = solve(calls, [tech("a"), tech("b")], {
+      pmQuotaPerDay: 0,
+      horizonDays: 1,
+      durations: { preventif: 60, reactif: 60 },
+    });
+    assert.equal(result.stats.served, 1);
+  });
+
+  it("un technicien « rendez-vous seulement » ne reçoit que ses rendez-vous", () => {
+    const calls = [
+      call({
+        id: "R1",
+        ville: "Drummondville",
+        type: "reactif",
+        planifie: true,
+        heure: "09:00",
+        techId: "shop",
+        scheduledOn: "2026-11-11",
+      }),
+      call({ id: "P1", ville: "Drummondville", type: "preventif" }),
+      call({ id: "P2", ville: "Drummondville", type: "preventif" }),
+    ];
+    const result = solve(calls, [tech("shop"), tech("road")], {
+      pmQuotaPerDay: 10,
+      horizonDays: 1,
+      pinOnlyTechIds: ["shop"],
+      durations: { preventif: 30, reactif: 60 },
+    });
+    const byTech = new Map<string, string[]>();
+    for (const day of result.days) {
+      for (const route of day.routes) {
+        byTech.set(route.techId, route.stops.map((stop) => stop.appel.id));
+      }
+    }
+    assert.deepEqual(byTech.get("shop"), ["R1"]);
+    assert.deepEqual([...(byTech.get("road") ?? [])].sort(), ["P1", "P2"]);
   });
 });

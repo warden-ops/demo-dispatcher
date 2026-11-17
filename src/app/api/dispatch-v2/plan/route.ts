@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { DEFAULT_DURATIONS } from "@/lib/guertech/constants";
 import { planDispatch } from "@/lib/guertech/plan";
 import type { Appel, Tech } from "@/lib/guertech/types";
 
@@ -42,11 +43,12 @@ export async function POST(request: Request) {
     horizonDays: Math.min(10, Math.max(1, Math.round(asNumber(record.horizonDays, 5)))),
     pmQuotaPerDay: Math.min(80, Math.max(0, Math.round(asNumber(record.pmQuota, 40)))),
     durations: {
-      preventif: asNumber(durations?.preventif, 60),
-      reactif: asNumber(durations?.reactif, 90),
+      preventif: asNumber(durations?.preventif, DEFAULT_DURATIONS.preventif),
+      reactif: asNumber(durations?.reactif, DEFAULT_DURATIONS.reactif),
     },
     allowOvertime: record.allowOvertime === true,
     moveAssigned: record.moveAssigned === true,
+    includeWorkshop: record.includeWorkshop === true,
     env: process.env,
   });
   return NextResponse.json(plan);
