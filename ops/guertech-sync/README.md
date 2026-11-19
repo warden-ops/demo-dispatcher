@@ -27,3 +27,33 @@ Simulation faite le 2026-11-17 (lecture seule, sans --execute) sur les 63 cas :
 4. Vérifier le bilan (erreurs = 0) et que le minuteur tourne toujours.
 
 `backfill_case_ids.txt` : ids prod des 63 cas.
+
+## Alertes « UE_Customer_AddUserNote » (2026-11-19)
+
+Depuis le 2026-11-19 8 h, le sandbox envoie un courriel d'erreur environ toutes
+les 15 minutes : script utilisateur `UE_Customer_AddUserNote` (déploiement 18531),
+`INSUFFICIENT_PERMISSION`, il manque « Listes > Documents et fichiers » au rôle
+d'intégration.
+
+Cause : deux nouveaux clients prod ont été copiés dans le sandbox à 8 h
+(PROD-CUST-3032 et PROD-CUST-480348). Ensuite, à chaque passage, la synchro
+réécrivait ces copies (et les chantiers PROD-JOB déjà copiés), parce que
+l'identifiant sandbox de la copie diffère de l'identifiant prod. Chaque
+réécriture d'un client déclenche le script, qui échoue, d'où un courriel.
+
+`clients-sans-reecriture.patch` (à appliquer après `sous-traitants-equipements.patch`,
+sha256 avant : 506f2d5a835c05695cca77ed95305415c2d27bf4530abb9c0eaf6fc5041b6ceb,
+après : 5b4ce2d73fc24f34ac060c8ddc153a87ca1a363007f6b5065c9500459812877c) :
+une copie client ou chantier déjà présente est réutilisée sans être réécrite.
+
+Simulation du 2026-11-19 (lecture seule, depuis 7 h 50) : avant 4 écritures
+client et 60 écritures chantier par passage, après 0 et 0 ; cas et tâches
+inchangés.
+
+Une nouvelle copie client déclenchera encore le script une fois. Correctif
+permanent, dans le sandbox seulement : ajouter « Listes > Documents et fichiers »
+(Afficher) au rôle d'intégration, ou retirer le contexte Web services / REST du
+déploiement 18531 (filtrage par contexte).
+
+Application : même marche que plus haut (copie de sauvegarde, `sudo patch`,
+puis vérifier au passage suivant du minuteur : bilan sans erreur, plus de courriel).

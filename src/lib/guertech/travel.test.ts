@@ -152,3 +152,24 @@ describe("temps de route", () => {
     assert.ok(Date.now() - started < 1500, `durée ${Date.now() - started}`);
   });
 });
+
+describe("profil routier (repli sans Google)", () => {
+  it("un saut urbain de 2 km compte 5 à 8 minutes, stationnement inclus", () => {
+    const minutes = travelMinutesFromKm(2);
+    assert.ok(minutes >= 5 && minutes <= 8, String(minutes));
+  });
+
+  it("15 km à vol d'oiseau donnent 20 à 30 minutes", () => {
+    const minutes = travelMinutesFromKm(15);
+    assert.ok(minutes >= 20 && minutes <= 30, String(minutes));
+  });
+
+  it("le temps croît avec la distance", () => {
+    let previous = 0;
+    for (const km of [0.5, 2, 5, 10, 20, 40, 80, 160, 300]) {
+      const minutes = travelMinutesFromKm(km);
+      assert.ok(minutes >= previous, `${km} km`);
+      previous = minutes;
+    }
+  });
+});

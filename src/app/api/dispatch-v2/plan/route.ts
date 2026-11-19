@@ -49,6 +49,7 @@ export async function POST(request: Request) {
     allowOvertime: record.allowOvertime === true,
     moveAssigned: record.moveAssigned === true,
     includeWorkshop: record.includeWorkshop === true,
+    ...(record.startAtDepot === true ? { bases: {} } : {}),
     env: process.env,
   });
   return NextResponse.json(plan);

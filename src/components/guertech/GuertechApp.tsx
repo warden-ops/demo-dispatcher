@@ -12,11 +12,14 @@ import {
   DEFAULT_DURATIONS,
   DRUMMONDVILLE_HQ,
   isReactifOverdue,
+  defaultPmQuota,
+  PM_PER_TECH_DAY,
   preventifPerBusinessDay,
   QUARTER,
   SLA,
 } from "@/lib/guertech/constants";
 import { loadAppels } from "@/lib/guertech/csv";
+import { TECH_PROFILES } from "@/lib/guertech/tech-profiles.data";
 import { onSiteMinutes } from "@/lib/guertech/assign";
 import {
   evaluateRoadWindow,
@@ -225,6 +228,7 @@ function Workspace() {
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [allowOvertime, setAllowOvertime] = useState<boolean | null>(null);
   const [includeWorkshop, setIncludeWorkshop] = useState(false);
+  const [startAtDepot, setStartAtDepot] = useState(false);
   const [overtimeWarnings, setOvertimeWarnings] = useState<OvertimeWarning[]>(
     [],
   );
@@ -560,7 +564,12 @@ function Workspace() {
       planDate: result.date,
       quota:
         Number(result.pmQuota) ||
-        Math.ceil(preventifPerBusinessDay(result.date)),
+        defaultPmQuota(
+          result.techs.filter(
+            (tech) => tech.present && TECH_PROFILES[tech.id]?.role !== "atelier",
+          ).length,
+          preventifPerBusinessDay(result.date),
+        ),
       durations: parseDurations(
         result.reactifDuration,
         result.preventifDuration,
@@ -900,7 +909,14 @@ function Workspace() {
     const dayDurations = options?.durations ?? durations;
     const quota =
       options?.quota ??
-      (pmQuotaNumber > 0 ? pmQuotaNumber : Math.ceil(avgPreventifPerDay));
+      (pmQuotaNumber > 0
+        ? pmQuotaNumber
+        : defaultPmQuota(
+            sourceTechs.filter(
+              (tech) => tech.present && TECH_PROFILES[tech.id]?.role !== "atelier",
+            ).length,
+            avgPreventifPerDay,
+          ));
 
     if (workingCalls.length === 0) {
       setError("Liste d'appels encore vide. Attendez la fin du chargement.");
@@ -1000,6 +1016,7 @@ function Workspace() {
             allowOvertime: overtimeAllowed,
             moveAssigned: canMove,
             includeWorkshop,
+            startAtDepot,
           }),
         });
         if (response.ok) {
@@ -1297,6 +1314,11 @@ function Workspace() {
                         .map((tech) => tech.name.split(" · ")[0])
                         .join(", ")}`
                     : "",
+                  planStats?.estimatedStarts?.length
+                    ? `Départ estimé (premier arrêt habituel, à confirmer) : ${planStats.estimatedStarts
+                        .map((tech) => `${tech.name.split(" · ")[0]} (${tech.label})`)
+                        .join(", ")}`
+                    : "",
                 ]
                   .filter(Boolean)
                   .join(" · ") || undefined
@@ -1387,7 +1409,7 @@ function Workspace() {
                 min={0}
                 max={80}
                 value={pmQuota}
-                placeholder={`ex. ${Math.ceil(avgPreventifPerDay)} (ratio Q4)`}
+                placeholder={`vide = ${PM_PER_TECH_DAY} par technicien présent (rythme Q4 ${Math.ceil(avgPreventifPerDay)}/jour)`}
                 onChange={(event) => setPmQuota(event.target.value)}
               />
             </label>
@@ -1431,6 +1453,14 @@ function Workspace() {
               onChange={(event) => setIncludeWorkshop(event.target.checked)}
             />
             Envoyer aussi les techniciens d&apos;atelier sur la route
+          </label>
+          <label className="gt-check" style={{ marginTop: "0.4rem" }}>
+            <input
+              type="checkbox"
+              checked={startAtDepot}
+              onChange={(event) => setStartAtDepot(event.target.checked)}
+            />
+            Faire partir tout le monde du dépôt (ignorer les départs estimés)
           </label>
         </section>
       </details>

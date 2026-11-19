@@ -1,8 +1,10 @@
+import { DRUMMONDVILLE_HQ } from "./constants";
 import type { EnvMap } from "../netsuite/config";
 import { geocodeAppels } from "../netsuite/geocode";
 import type { Appel, PlanStats, RemoteTrip, Tech, Unassigned } from "./types";
 import { pointForAppel, pointForStart, type LatLng } from "./territory";
 import { splitRoadTechs, TECH_PROFILES, type ProfileMap } from "./tech-profiles";
+import { TECH_BASES, type TechBase } from "./tech-bases.data";
 import { buildTravelMatrix } from "./travel";
 import { solveVrp, type PlannedRoute } from "./vrp";
 
@@ -26,6 +28,12 @@ export async function planDispatch(input: {
   includeWorkshop?: boolean;
   /** Profils (secteurs, rôle). Par défaut : profils tirés de NetSuite. Passer {} pour les ignorer. */
   profiles?: ProfileMap;
+  /**
+   * Points de départ estimés (premier arrêt habituel de la journée). Utilisés
+   * seulement quand le départ du technicien est resté au dépôt par défaut.
+   * Passer {} pour tout faire partir du dépôt.
+   */
+  bases?: Record<string, TechBase>;
   env?: EnvMap;
   fetchImpl?: typeof fetch;
 }): Promise<DispatchPlan> {
@@ -61,7 +69,17 @@ export async function planDispatch(input: {
     located.push({ ...appel, lat: point.lat, lng: point.lng });
     points.push(point);
   }
-  for (const tech of present) points.push(pointForStart(tech.start));
+  const bases = input.bases ?? TECH_BASES;
+  const estimatedStarts: NonNullable<PlanStats["estimatedStarts"]> = [];
+  for (const tech of present) {
+    const base = bases[tech.id];
+    if (base && startsAtDepot(tech.start)) {
+      points.push({ lat: base.lat, lng: base.lng });
+      estimatedStarts.push({ id: tech.id, name: tech.name, label: base.label });
+    } else {
+      points.push(pointForStart(tech.start));
+    }
+  }
 
   const travelStarted = Date.now();
   const matrix = await buildTravelMatrix(points, {
@@ -96,6 +114,13 @@ export async function planDispatch(input: {
       travelSource: matrix.source,
       ...(matrix.warning ? { travelWarning: matrix.warning } : {}),
       excludedTechs: split.excluded,
+      ...(estimatedStarts.length ? { estimatedStarts } : {}),
     },
   };
+}
+
+/** Départ laissé au dépôt (valeur par défaut) : on peut le remplacer par l'estimation. */
+export function startsAtDepot(start: string | undefined): boolean {
+  const text = (start ?? "").trim().toLowerCase();
+  return !text || text === DRUMMONDVILLE_HQ.toLowerCase();
 }

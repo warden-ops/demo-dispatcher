@@ -114,6 +114,23 @@ export function preventifPerBusinessDay(fromIso: string): number {
   return Math.ceil((QUARTER.quarterTarget / days) * 10) / 10;
 }
 
+/**
+ * Visites visées par technicien de route et par journée. L'historique NetSuite (août-novembre 2026)
+ * donne 4 à 5 visites par jour pour les techniciens sur la route.
+ */
+export const PM_PER_TECH_DAY = 5;
+
+/**
+ * Quota préventif par défaut quand le champ est vide : assez de place pour remplir les journées
+ * (techniciens de route présents × PM_PER_TECH_DAY), jamais sous le rythme Q4. Le temps de route et
+ * la fin de journée bornent ensuite chaque route. L'ancien défaut (rythme Q4 seul, environ 7 par jour
+ * pour toute l'équipe) limitait les techniciens à environ 3 appels par jour.
+ */
+export function defaultPmQuota(roadTechsPresent: number, q4Ratio: number): number {
+  const target = Math.max(Math.ceil(q4Ratio), Math.max(1, roadTechsPresent) * PM_PER_TECH_DAY);
+  return Math.min(80, target);
+}
+
 /** Calendar days open (openedAt → asOf), for réactif 2-day SLA. */
 export function daysOpen(openedAt: string, asOfIso: string): number {
   const opened = new Date(`${openedAt}T12:00:00`);
