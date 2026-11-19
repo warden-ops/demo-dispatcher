@@ -2,10 +2,12 @@ import {
   ALL_SKILL_IDS,
   DEFAULT_DURATIONS,
   DRUMMONDVILLE_HQ,
+  defaultPmQuota,
   isReactifOverdue,
   preventifPerBusinessDay,
 } from "./constants";
 import { ROAD_WINDOW } from "./optimize";
+import { TECH_PROFILES } from "./tech-profiles.data";
 import type { Appel, Tech } from "./types";
 
 export function todayIsoDate(): string {
@@ -231,14 +233,9 @@ export function suggestPlannerFields(options: {
   if (quotaWasBlank) {
     const presentCount = Math.max(
       1,
-      techs.filter((tech) => tech.present).length,
+      techs.filter((tech) => tech.present && TECH_PROFILES[tech.id]?.role !== "atelier").length,
     );
-    const packTarget = Math.max(
-      Math.ceil(ratio),
-      Math.max(4, regionCount) * 3,
-      presentCount * 3,
-    );
-    pmQuota = String(Math.min(80, packTarget));
+    pmQuota = String(defaultPmQuota(Math.max(presentCount, regionCount), ratio));
     summary.push(
       `Quota préventif → ${pmQuota} (${presentCount} technicien(s), ratio Q4 ≈ ${ratio}/jour)`,
     );

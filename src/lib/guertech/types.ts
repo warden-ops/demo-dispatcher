@@ -110,5 +110,7 @@ export type PlanStats = {
   travelWarning?: string;
   /** Techniciens présents mais retirés de la route (atelier, compte en double). */
   excludedTechs?: Array<{ id: string; name: string; reason: string }>;
+  /** Techniciens partis d'un point estimé (premier arrêt habituel), pas du dépôt. */
+  estimatedStarts?: Array<{ id: string; name: string; label: string }>;
   overtimeRoutes: number;
 };

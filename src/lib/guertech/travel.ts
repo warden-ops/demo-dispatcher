@@ -5,18 +5,39 @@ import type { LatLng } from "./territory";
 import { readEnvValue, type EnvMap } from "../netsuite/config";
 
 /**
- * Repli sans Google. Court trajet : rues lentes. Long trajet : autoroute
- * (~100 km/h, facteur proche de 1,1). Drummondville → Ottawa/Gatineau
- * tombe autour de 2 h 45, pas 4 h.
+ * Repli sans Google. Court trajet recalé le 2026-11-19 sur des trajets réels
+ * du territoire (OSRM, appels Guertech) : l'ancien profil donnait 2 min pour
+ * 2 km en ville au lieu de 5 à 6. Long trajet inchangé (autoroute ~100 km/h,
+ * Drummondville vers Ottawa autour de 2 h 45, comme Google). On ajoute 1,5 min
+ * de stationnement par trajet.
  */
 export const ROAD_FACTOR = 1.3;
 export const ROAD_SPEED_KMH = 72;
+const PARKING_MIN = 1.5;
+
+/** [km à vol d'oiseau, facteur de détour, vitesse km/h sur la route] */
+const ROAD_PROFILE: Array<[number, number, number]> = [
+  [0, 1.4, 32],
+  [5, 1.33, 42],
+  [20, 1.28, 60],
+  [40, 1.27, 72],
+  [160, 1.1, 102],
+];
 
 function roadProfile(crowKm: number): { factor: number; speed: number } {
-  if (crowKm <= 30) return { factor: 1.3, speed: 70 };
-  if (crowKm >= 160) return { factor: 1.1, speed: 102 };
-  const t = (crowKm - 30) / 130;
-  return { factor: 1.3 + (1.1 - 1.3) * t, speed: 70 + (102 - 70) * t };
+  for (let index = 1; index < ROAD_PROFILE.length; index += 1) {
+    const [toKm, toFactor, toSpeed] = ROAD_PROFILE[index];
+    if (crowKm <= toKm) {
+      const [fromKm, fromFactor, fromSpeed] = ROAD_PROFILE[index - 1];
+      const t = (crowKm - fromKm) / (toKm - fromKm);
+      return {
+        factor: fromFactor + (toFactor - fromFactor) * t,
+        speed: fromSpeed + (toSpeed - fromSpeed) * t,
+      };
+    }
+  }
+  const [, factor, speed] = ROAD_PROFILE[ROAD_PROFILE.length - 1];
+  return { factor, speed };
 }
 
 const MATRIX_URL =
@@ -66,7 +87,7 @@ function fatalGoogleStatus(status: number, body: string): boolean {
 export function travelMinutesFromKm(km: number): number {
   if (km < 0.05) return 0;
   const { factor, speed } = roadProfile(km);
-  return Math.max(1, Math.round(((km * factor) / speed) * 60));
+  return Math.max(1, Math.round(PARKING_MIN + ((km * factor) / speed) * 60));
 }
 
 export function roadKm(km: number): number {

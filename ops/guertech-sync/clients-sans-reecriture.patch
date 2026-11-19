@@ -1,0 +1,15 @@
+--- a/sync_prod_to_sandbox.py	2026-11-19 12:18:34.027984564 -0500
++++ b/sync_prod_to_sandbox.py	2026-11-19 12:18:34.039984547 -0500
+@@ -227,6 +227,12 @@
+             self.log(niveau='avis', msg='entite liee de type non gere, champ laisse vide', id=pid, type=kind); return None
+         if not r: return None
+         r = r[0]; e = self.eid(tag, pid)
++        # Copie deja presente: on la reutilise sans la reecrire. Reecrire un client a chaque passage
++        # declenchait UE_Customer_AddUserNote (role sans "Documents et fichiers") et une alerte courriel.
++        known = self.sandbox_by_eid(table, e)
++        if known:
++            self.cust_map[str(pid)] = known
++            return known
+         name = (self.title_prefix + (r.get('companyname') or r['entityid']))[:83]
+         body = {'companyName': name, 'externalId': e, 'comments': f'Copie synchro prod, entite prod {pid}'}
+         if rtype == 'customer':
