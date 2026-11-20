@@ -73,6 +73,8 @@ export type TechRoute = {
   returnDriveKm?: number;
   finishMin?: number;
   travelSource?: "haversine" | "google" | "mixed";
+  /** Libellé du retour en fin de journée (dépôt, domicile, adresse saisie). */
+  returnLabel?: string;
 };
 
 export type RemoteTripCall = {
@@ -112,5 +114,18 @@ export type PlanStats = {
   excludedTechs?: Array<{ id: string; name: string; reason: string }>;
   /** Techniciens partis d'un point estimé (premier arrêt habituel), pas du dépôt. */
   estimatedStarts?: Array<{ id: string; name: string; label: string }>;
+  /** Départ et retour retenus pour chaque technicien sur la route. */
+  techEndpoints?: Array<{
+    id: string;
+    name: string;
+    start: string;
+    end: string;
+    startKind: "dépôt" | "domicile" | "estimé" | "saisi";
+    endKind: "dépôt" | "domicile" | "estimé" | "saisi";
+    startAddress: string;
+    endAddress: string;
+  }>;
+  /** Adresses saisies non reconnues (sans clé Google) : dépôt utilisé. */
+  addressWarnings?: string[];
   overtimeRoutes: number;
 };

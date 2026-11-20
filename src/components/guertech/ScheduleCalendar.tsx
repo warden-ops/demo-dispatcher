@@ -131,8 +131,8 @@ function buildTimeline(
       endMin: cursor + returnMin,
       minutes: returnMin,
       label: returnLeg?.durationText
-        ? `Retour dépôt · ${returnLeg.durationText}`
-        : `Retour dépôt · ${returnMin} min${returnKm}`,
+        ? `${route.returnLabel ?? "Retour dépôt"} · ${returnLeg.durationText}`
+        : `${route.returnLabel ?? "Retour dépôt"} · ${returnMin} min${returnKm}`,
     });
   }
 

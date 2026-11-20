@@ -81,14 +81,25 @@ function toTechRoutes(
   day: PlanDayResponse,
   techs: Tech[],
   source: PlanStats["travelSource"],
+  endpoints: PlanStats["techEndpoints"] = [],
 ): TechRoute[] {
   const byId = new Map(day.routes.map((route) => [route.techId, route]));
+  const endpointById = new Map(endpoints.map((item) => [item.id, item]));
   return techs
     .filter((tech) => tech.present)
     .map((tech) => {
       const plan = byId.get(tech.id);
+      const endpoint = endpointById.get(tech.id);
       return {
-        tech,
+        // Départ et retour réellement utilisés par le plan.
+        tech: endpoint
+          ? { ...tech, start: endpoint.startAddress, end: endpoint.endAddress }
+          : tech,
+        returnLabel: endpoint
+          ? endpoint.endKind === "dépôt"
+            ? "Retour dépôt"
+            : `Retour ${endpoint.end.toLowerCase()}`
+          : undefined,
         stops: (plan?.stops ?? []).map((stop) => ({
           ...stop,
           appel: { ...stop.appel, techId: tech.id },
@@ -229,6 +240,7 @@ function Workspace() {
   const [allowOvertime, setAllowOvertime] = useState<boolean | null>(null);
   const [includeWorkshop, setIncludeWorkshop] = useState(false);
   const [startAtDepot, setStartAtDepot] = useState(false);
+  const [useEstimatedStarts, setUseEstimatedStarts] = useState(false);
   const [overtimeWarnings, setOvertimeWarnings] = useState<OvertimeWarning[]>(
     [],
   );
@@ -1017,13 +1029,19 @@ function Workspace() {
             moveAssigned: canMove,
             includeWorkshop,
             startAtDepot,
+            useEstimatedStarts,
           }),
         });
         if (response.ok) {
           const plan = (await response.json()) as PlanResponse;
           const horizon = plan.days.map((day) => ({
             date: day.date,
-            routes: toTechRoutes(day, readyTechs, plan.stats.travelSource),
+            routes: toTechRoutes(
+              day,
+              readyTechs,
+              plan.stats.travelSource,
+              plan.stats.techEndpoints,
+            ),
           }));
           const selected =
             horizon.find((day) => day.date === planDate) ?? horizon[0];
@@ -1314,11 +1332,21 @@ function Workspace() {
                         .map((tech) => tech.name.split(" · ")[0])
                         .join(", ")}`
                     : "",
-                  planStats?.estimatedStarts?.length
-                    ? `Départ estimé (premier arrêt habituel, à confirmer) : ${planStats.estimatedStarts
-                        .map((tech) => `${tech.name.split(" · ")[0]} (${tech.label})`)
+                  planStats?.techEndpoints?.some(
+                    (tech) => tech.startKind !== "dépôt" || tech.endKind !== "dépôt",
+                  )
+                    ? `Hors dépôt : ${planStats.techEndpoints
+                        .filter((tech) => tech.startKind !== "dépôt" || tech.endKind !== "dépôt")
+                        .map(
+                          (tech) =>
+                            `${tech.name.split(" · ")[0]} (départ ${tech.start.toLowerCase()}, retour ${tech.end.toLowerCase()})`,
+                        )
                         .join(", ")}`
                     : "",
+                  planStats?.estimatedStarts?.length
+                    ? "Départs estimés : premier arrêt habituel, à confirmer"
+                    : "",
+                  ...(planStats?.addressWarnings ?? []),
                 ]
                   .filter(Boolean)
                   .join(" · ") || undefined
@@ -1460,7 +1488,15 @@ function Workspace() {
               checked={startAtDepot}
               onChange={(event) => setStartAtDepot(event.target.checked)}
             />
-            Faire partir tout le monde du dépôt (ignorer les départs estimés)
+            Faire partir et revenir tout le monde au dépôt (ignorer les domiciles fixes ; les adresses saisies restent)
+          </label>
+          <label className="gt-check" style={{ marginTop: "0.4rem" }}>
+            <input
+              type="checkbox"
+              checked={useEstimatedStarts}
+              onChange={(event) => setUseEstimatedStarts(event.target.checked)}
+            />
+            Utiliser les départs estimés (premier arrêt habituel, à confirmer) pour les techniciens sans domicile fixe
           </label>
         </section>
       </details>

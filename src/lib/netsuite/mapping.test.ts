@@ -123,6 +123,18 @@ describe("mapping SuiteQL", () => {
     assert.equal(mapTechRow({ id: "9", department: "Ventes" }), null);
   });
 
+  it("préremplit le domicile fixe (départ et retour), sinon le dépôt", () => {
+    const marier = mapTechRow({ id: "463934", firstname: "Philippe", lastname: "Marier", department: "Technique" });
+    assert.equal(marier?.start, "122 rue de la Falaise, Labelle, QC J0T 1H0");
+    assert.equal(marier?.end, "122 rue de la Falaise, Labelle, QC J0T 1H0");
+    const villeneuve = mapTechRow({ id: "123", firstname: "William", lastname: "Villeneuve", department: "Technique" });
+    assert.equal(villeneuve?.start, "212 rue Cartier, Granby, QC J2G 5A6");
+    assert.equal(villeneuve?.end, "212 rue Cartier, Granby, QC J2G 5A6");
+    const other = mapTechRow({ id: "77", firstname: "Marie", lastname: "Roy", department: "Atelier" });
+    assert.equal(other?.start, other?.end);
+    assert.match(other?.start ?? "", /Cormier/);
+  });
+
   it("préfère la ville structurée et retombe sur le bloc NetSuite", () => {
     const structured = mapAppelRow({
       task_id: "70",
