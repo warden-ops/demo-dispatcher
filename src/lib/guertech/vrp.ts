@@ -137,6 +137,13 @@ export function solveVrp(input: SolveInput): SolveResult {
     };
   }
 
+  // Matrice : appels, puis départ de chaque technicien, puis (optionnel) son
+  // point d'arrivée. Sans points d'arrivée, le retour se fait au départ.
+  const separateEnds = size === callCount + 2 * techCount;
+  const startNode = (tech: number) => callCount + tech;
+  const endNode = (tech: number) =>
+    separateEnds ? callCount + techCount + tech : callCount + tech;
+
   const dayStart = new Int16Array(techCount);
   const dayEnd = new Int16Array(techCount);
   for (let tech = 0; tech < techCount; tech += 1) {
@@ -258,9 +265,8 @@ export function solveVrp(input: SolveInput): SolveResult {
     if (pinKind[call] === "hard" || pinKind[call] === "later") continue;
     let fits = false;
     for (let tech = 0; tech < techCount; tech += 1) {
-      const depot = callCount + tech;
-      const outbound = at(matrix.minutes, size, depot, call);
-      const inbound = at(matrix.minutes, size, call, depot);
+      const outbound = at(matrix.minutes, size, startNode(tech), call);
+      const inbound = at(matrix.minutes, size, call, endNode(tech));
       if (dayStart[tech] + outbound + service[call] + inbound <= dayEnd[tech]) {
         fits = true;
         break;
@@ -282,7 +288,8 @@ export function solveVrp(input: SolveInput): SolveResult {
     depart: number;
     missedBy: number;
   } | null => {
-    const depot = callCount + tech;
+    const depot = startNode(tech);
+    const home = endNode(tech);
     const end = dayEnd[tech];
     if (stops.length === 0) {
       return { driveMin: 0, driveKm: 0, finish: depart, depart, missedBy: 0 };
@@ -308,13 +315,13 @@ export function solveVrp(input: SolveInput): SolveResult {
       time = leave;
       prev = id;
     }
-    const back = at(matrix.minutes, size, prev, depot);
+    const back = at(matrix.minutes, size, prev, home);
     const finish = time + back;
     const last = stops[stops.length - 1];
     if (finish > end && !timedPin(last)) return null;
     return {
       driveMin: driveMin + back,
-      driveKm: driveKm + at(matrix.km, size, prev, depot),
+      driveKm: driveKm + at(matrix.km, size, prev, home),
       finish,
       depart,
       missedBy,
@@ -643,7 +650,7 @@ export function solveVrp(input: SolveInput): SolveResult {
       if (!Number.isFinite(dist) || dist === Infinity) {
         for (let tech = 0; tech < techCount; tech += 1) {
           if (!canTake(tech, index)) continue;
-          dist = Math.min(dist, at(matrix.km, size, callCount + tech, index));
+          dist = Math.min(dist, at(matrix.km, size, startNode(tech), index));
         }
       }
       const id = calls[index].id;
@@ -801,7 +808,8 @@ export function solveVrp(input: SolveInput): SolveResult {
   }
 
   const describe = (route: MutableRoute) => {
-    const depot = callCount + route.tech;
+    const depot = startNode(route.tech);
+    const home = endNode(route.tech);
     const end = dayEnd[route.tech];
     let time = route.depart || dayStart[route.tech];
     let prev = depot;
@@ -854,8 +862,8 @@ export function solveVrp(input: SolveInput): SolveResult {
       time = leave;
       prev = id;
     }
-    const returnDriveMin = Math.round(at(matrix.minutes, size, prev, depot));
-    const returnDriveKm = Math.round(at(matrix.km, size, prev, depot) * 10) / 10;
+    const returnDriveMin = Math.round(at(matrix.minutes, size, prev, home));
+    const returnDriveKm = Math.round(at(matrix.km, size, prev, home) * 10) / 10;
     return {
       techId: techs[route.tech].id,
       date: days[route.day],
@@ -866,7 +874,7 @@ export function solveVrp(input: SolveInput): SolveResult {
       returnDriveKm,
       finishMin: Math.round(time + returnDriveMin),
       departMin: route.depart || dayStart[route.tech],
-      withinWindow: time + at(matrix.minutes, size, prev, depot) <= end,
+      withinWindow: time + at(matrix.minutes, size, prev, home) <= end,
     };
   };
 
@@ -996,11 +1004,10 @@ function buildRemoteTrips(input: {
     let best = Infinity;
     let kmBest = Infinity;
     for (let tech = 0; tech < techCount; tech += 1) {
-      const depot = callCount + tech;
-      const minutes = at(matrix.minutes, size, depot, call);
+      const minutes = at(matrix.minutes, size, callCount + tech, call);
       if (minutes < best) {
         best = minutes;
-        kmBest = at(matrix.km, size, depot, call);
+        kmBest = at(matrix.km, size, callCount + tech, call);
       }
     }
     return { minutes: best, km: kmBest };

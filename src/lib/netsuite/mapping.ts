@@ -3,6 +3,7 @@ import {
   DRUMMONDVILLE_HQ,
   EQUIPMENT,
 } from "../guertech/constants";
+import { TECH_HOME_BASES } from "../guertech/tech-home-bases";
 import type { Appel, CallType, Tech } from "../guertech/types";
 import {
   deriveRegion,
@@ -279,12 +280,14 @@ export function mapTechRow(row: Record<string, unknown>): Tech | null {
 
   const ville = cell(row, "city");
   const location = cell(row, "location");
+  // Domicile fixe confirmé par Guertech, sinon dépôt (départ et retour).
+  const home = TECH_HOME_BASES[id];
   return {
     id,
     name: `${person} · ${department}`,
     present: false,
-    start: DRUMMONDVILLE_HQ,
-    end: DRUMMONDVILLE_HQ,
+    start: home ? home.address : DRUMMONDVILLE_HQ,
+    end: home?.returnsHome ? home.address : DRUMMONDVILLE_HQ,
     startHour: "",
     endHour: "",
     hours: 0,

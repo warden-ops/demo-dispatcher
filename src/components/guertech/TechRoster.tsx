@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { AddressInput } from "@/components/AddressInput";
 import { EQUIPMENT, REGIONS } from "@/lib/guertech/constants";
+import { TECH_HOME_BASES } from "@/lib/guertech/tech-home-bases";
 import type { Tech } from "@/lib/guertech/types";
 
 type TechRosterProps = {
@@ -127,14 +128,16 @@ export function TechRoster({
                 id={`start-${tech.id}`}
                 label="Point de départ"
                 value={tech.start}
-                placeholder="Adresse de départ"
+                placeholder="Vide : dépôt (1000 rue Cormier)"
+                hint={defaultHint(tech.id)}
                 onChange={(value) => onChange(tech.id, { start: value })}
               />
               <AddressInput
                 id={`end-${tech.id}`}
-                label="Point d'arrivée"
+                label="Point d'arrivée (retour en fin de journée)"
                 value={tech.end}
-                placeholder="Adresse d'arrivée"
+                placeholder="Vide : retour au dépôt"
+                hint={defaultHint(tech.id)}
                 onChange={(value) => onChange(tech.id, { end: value })}
               />
               <div className="gt-skills">
@@ -167,4 +170,11 @@ export function TechRoster({
       ) : null}
     </section>
   );
+}
+
+function defaultHint(techId: string): string {
+  const home = TECH_HOME_BASES[techId];
+  return home
+    ? `Par défaut : domicile fixe, ${home.address}. Une autre adresse saisie a priorité.`
+    : "Par défaut : dépôt, 1000 rue Cormier, Drummondville. Une adresse saisie a priorité.";
 }

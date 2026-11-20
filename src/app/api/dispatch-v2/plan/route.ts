@@ -49,7 +49,9 @@ export async function POST(request: Request) {
     allowOvertime: record.allowOvertime === true,
     moveAssigned: record.moveAssigned === true,
     includeWorkshop: record.includeWorkshop === true,
-    ...(record.startAtDepot === true ? { bases: {} } : {}),
+    // Case « tout le monde au dépôt » : ignore les domiciles fixes (les adresses saisies restent).
+    ...(record.startAtDepot === true ? { homeBases: {} } : {}),
+    useEstimatedStarts: record.useEstimatedStarts === true,
     env: process.env,
   });
   return NextResponse.json(plan);
