@@ -128,4 +128,6 @@ export type PlanStats = {
   /** Adresses saisies non reconnues (sans clé Google) : dépôt utilisé. */
   addressWarnings?: string[];
   overtimeRoutes: number;
+  bookedOvertimeRoutes?: number;
+  floor?: import("./vrp").FloorStats;
 };

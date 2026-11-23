@@ -11,8 +11,12 @@ export type TerritoryCity = {
   aliases?: string[];
 };
 
-/** Dépôt Guertech, 1000 rue Cormier, Drummondville. */
-export const DEPOT: LatLng = { lat: 45.8968, lng: -72.5194 };
+/**
+ * Dépôt Guertech, 1000 rue Cormier, Drummondville. OpenStreetMap, nœud
+ * 7693201170 « Guertech » (45.8868, -72.5120). L'ancienne valeur
+ * (45.8968, -72.5194) était environ 1,2 km au nord.
+ */
+export const DEPOT: LatLng = { lat: 45.8868, lng: -72.512 };
 
 export const TERRITORY_CITIES: TerritoryCity[] = [
   { name: "Drummondville", region: "Centre-du-Québec", lat: 45.883, lng: -72.484 },
