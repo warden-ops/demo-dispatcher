@@ -9,6 +9,7 @@ import {
 import { SLA } from "./constants";
 import { ROAD_WINDOW } from "./optimize";
 import type { TravelMatrix } from "./travel";
+import { improveRoutes, type LnsStats } from "./improve";
 import { nearestAnchor, zoneSoftPenalty, type ProfileMap } from "./tech-profiles";
 import type { Appel, RemoteTrip, Tech, Unassigned } from "./types";
 
@@ -17,6 +18,11 @@ const OVERNIGHT_ONE_WAY_MIN = 300;
 const EARLIEST_DEPART_MIN = 5 * 60;
 const ZONE_PENALTY_MIN = 45;
 const LOAD_WEIGHT = 0.25;
+/** Plancher visé d'appels par technicien et par jour. */
+export const FLOOR_PER_TECH_DAY = 5;
+const FLOOR_PENALTY = 400;
+const PREVENTIF_VALUE = 1000;
+const REACTIF_VALUE = 3000;
 
 export type PlannedStop = {
   appel: Appel;
@@ -56,7 +62,19 @@ export type SolveResult = {
     remoteCalls: number;
     elapsedMs: number;
     overtimeRoutes: number;
+    /** Journées qui dépassent seulement à cause de rendez-vous fixes déjà pris. */
+    bookedOvertimeRoutes?: number;
+    floor?: FloorStats;
   };
+};
+
+export type FloorStats = {
+  /** Plancher visé par technicien et par jour. */
+  target: number;
+  techDays: number;
+  underFloor: Array<{ techId: string; date: string; count: number; reason: string }>;
+  minPerTechDay: number;
+  search: LnsStats;
 };
 
 export type SolveInput = {
@@ -74,6 +92,16 @@ export type SolveInput = {
   profiles?: ProfileMap;
   /** Techniciens gardés seulement pour les rendez-vous qui leur sont déjà attribués. */
   pinOnlyTechIds?: string[];
+  /** Journée de travail (minutes depuis minuit). Défaut 8 h à 17 h, route comprise. */
+  workday?: { start: number; end: number };
+  /** Plancher visé d'appels par technicien et par jour (défaut 5). */
+  floorPerTechDay?: number;
+  /** Temps maximal de la recherche d'amélioration (ms). 0 : désactivée. */
+  improveMs?: number;
+  /** Nombre maximal d'itérations de la recherche (résultat reproductible). */
+  improveIterations?: number;
+  /** Graine de la recherche (résultat reproductible). */
+  improveSeed?: number;
 };
 
 type MutableRoute = {
@@ -148,11 +176,13 @@ export function solveVrp(input: SolveInput): SolveResult {
   const dayEnd = new Int16Array(techCount);
   for (let tech = 0; tech < techCount; tech += 1) {
     const item = techs[tech];
+    const dayOpen = input.workday?.start ?? 8 * 60;
+    const dayClose = input.workday?.end ?? 17 * 60;
     let start = parseMinutes(item.startHour || ROAD_WINDOW.start);
-    start = Math.max(8 * 60, start);
+    start = Math.max(dayOpen, input.workday ? Math.min(start, dayOpen) : start);
     let end = parseMinutes(item.endHour || ROAD_WINDOW.softEnd);
-    if (input.allowOvertime) end = Math.max(end, 17 * 60) + 120;
-    else end = Math.min(end, 17 * 60);
+    if (input.allowOvertime) end = Math.max(end, dayClose) + 120;
+    else end = input.workday ? dayClose : Math.min(end, dayClose);
     if (end < start + 60) end = start + 60;
     dayStart[tech] = start;
     dayEnd[tech] = end;
@@ -328,6 +358,30 @@ export function solveVrp(input: SolveInput): SolveResult {
     };
   };
 
+  // Limite de la journée : 8 h à 17 h, ou plus si des rendez-vous fixes
+  // (à eux seuls) l'imposent déjà.
+  const boundCache = new Map<string, { finish: number; span: number }>();
+  const workBound = (stops: number[], tech: number) => {
+    const normal = { finish: dayEnd[tech], span: dayEnd[tech] - dayStart[tech] };
+    const pins = stops.filter((id) => timedPin(id));
+    if (pins.length === 0) return normal;
+    const key = `${tech}:${pins.join(",")}`;
+    const cached = boundCache.get(key);
+    if (cached) return cached;
+    let forced = simulate(pins, tech, dayStart[tech]);
+    if (forced && forced.missedBy > 0) {
+      forced = simulate(pins, tech, Math.max(EARLIEST_DEPART_MIN, dayStart[tech] - forced.missedBy));
+    }
+    const bound = forced
+      ? {
+          finish: Math.max(normal.finish, forced.finish),
+          span: Math.max(normal.span, forced.finish - forced.depart),
+        }
+      : normal;
+    boundCache.set(key, bound);
+    return bound;
+  };
+
   const evaluate = (
     stops: number[],
     tech: number,
@@ -339,6 +393,16 @@ export function solveVrp(input: SolveInput): SolveResult {
       simulated = simulate(stops, tech, earlier);
     }
     if (!simulated || simulated.missedBy > 0) return null;
+    // Journée de travail : dès qu'un appel est ajouté par le planificateur
+    // (pas un rendez-vous à heure fixe), retour avant la fin de journée et
+    // durée totale au plus égale à la journée normale. Si les rendez-vous
+    // fixes à eux seuls dépassent déjà, les appels ajoutés ne doivent pas
+    // allonger la journée davantage.
+    if (stops.some((id) => !timedPin(id))) {
+      const bound = workBound(stops, tech);
+      if (simulated.finish > bound.finish + 0.01) return null;
+      if (simulated.finish - simulated.depart > bound.span + 0.01) return null;
+    }
     return simulated;
   };
 
@@ -807,6 +871,128 @@ export function solveVrp(input: SolveInput): SolveResult {
     if (totalDrive() >= before - 0.5) break;
   }
 
+  // Recherche « détruire et reconstruire » : plus d'appels par technicien et
+  // par jour, plancher visé, puis moins de route.
+  const floorTarget = input.floorPerTechDay ?? FLOOR_PER_TECH_DAY;
+  const windowOf = (tech: number) => dayEnd[tech] - dayStart[tech];
+  const fixed = new Uint8Array(callCount);
+  const isPreventifFree = new Uint8Array(callCount);
+  const pool: number[] = [];
+  for (let index = 0; index < callCount; index += 1) {
+    if (calls[index].planifie || pinKind[index] !== "none") fixed[index] = 1;
+    if (calls[index].type === "preventif" && !calls[index].planifie) isPreventifFree[index] = 1;
+    if (!fixed[index] && !remote[index]) pool.push(index);
+  }
+  const exempt = new Uint8Array(routes.length);
+  routes.forEach((route, index) => {
+    if (pinOnly[route.tech]) {
+      exempt[index] = 1;
+      return;
+    }
+    const pinsOnly = route.stops.filter((id) => timedPin(id));
+    if (pinsOnly.length === 0) return;
+    const forced = simulate(pinsOnly, route.tech, dayStart[route.tech]);
+    const earlier = forced && forced.missedBy > 0
+      ? simulate(pinsOnly, route.tech, Math.max(EARLIEST_DEPART_MIN, dayStart[route.tech] - forced.missedBy))
+      : forced;
+    if (
+      !earlier ||
+      earlier.finish > dayEnd[route.tech] ||
+      earlier.finish - earlier.depart > windowOf(route.tech)
+    ) {
+      exempt[index] = 1;
+    }
+  });
+  const routeIndex = new Map(routes.map((route, index) => [route, index]));
+  const lnsStats = improveRoutes({
+    routes,
+    callCount,
+    evaluate,
+    canPlace: (call, route) =>
+      (locked[call] < 0 || locked[call] === route.tech) &&
+      canTake(route.tech, call) &&
+      dayAllowed(call, route.day),
+    fixed,
+    isPreventif: isPreventifFree,
+    value: (call, day) =>
+      calls[call].type === "reactif"
+        ? REACTIF_VALUE - (overdue[call] ? day * 150 : day * 3)
+        : PREVENTIF_VALUE - day * 3,
+    routeCost: (route, stops, driveMin) => {
+      let zone = 0;
+      for (const id of stops) zone += zonePenalty(route.tech, id);
+      return driveMin + zone + jumpPenalty(stops);
+    },
+    floor: floorTarget,
+    floorPenalty: FLOOR_PENALTY,
+    floorExempt: (route) => exempt[routeIndex.get(route as MutableRoute) ?? 0] === 1,
+    pool,
+    placed,
+    quota,
+    pmCount,
+    minutes: (from, to) => at(matrix.minutes, size, from, to),
+    fromStart: (route, call) => at(matrix.minutes, size, startNode(route.tech), call),
+    maxIterations: input.improveIterations ?? 20000,
+    seed: input.improveSeed,
+    deadline: Date.now() + (input.improveMs ?? 4000),
+  });
+  twoOpt();
+
+  // Appels non placés : la recherche a pu en placer ou en retirer.
+  for (let index = unassigned.length - 1; index >= 0; index -= 1) {
+    const at = calls.indexOf(unassigned[index].appel);
+    if (at >= 0 && placed[at] && pool.includes(at)) unassigned.splice(index, 1);
+  }
+  const listed = new Set(unassigned.map((item) => item.appel.id));
+  for (const index of pool) {
+    if (placed[index] || listed.has(calls[index].id)) continue;
+    unassigned.push({
+      appel: calls[index],
+      reason: "Journées pleines avant 17 h : des appels plus rapides à atteindre remplissent les tournées.",
+    });
+  }
+
+  const underFloor: FloorStats["underFloor"] = [];
+  routes.forEach((route, index) => {
+    if (route.stops.length >= floorTarget || pinOnly[route.tech]) return;
+    let reason: string;
+    if (exempt[index]) {
+      reason = "Journée prise par des rendez-vous fixes (trajet long ou heure imposée).";
+    } else {
+      let feasible = false;
+      for (const call of pool) {
+        if (placed[call]) continue;
+        if (locked[call] >= 0 && locked[call] !== route.tech) continue;
+        if (!canTake(route.tech, call) || !dayAllowed(call, route.day)) continue;
+        if (isPreventifFree[call] && pmCount[route.day] >= quota) continue;
+        for (let pos = 0; pos <= route.stops.length && !feasible; pos += 1) {
+          const next = route.stops.slice();
+          next.splice(pos, 0, call);
+          if (evaluate(next, route.tech)) feasible = true;
+        }
+        if (feasible) break;
+      }
+      reason = feasible
+        ? "Un autre appel entrerait, mais il est déjà mieux placé ailleurs ou coûte plus de route qu'il n'en rapporte."
+        : "Aucun autre appel faisable avant 17 h, route et retour inclus.";
+    }
+    underFloor.push({
+      techId: techs[route.tech].id,
+      date: days[route.day],
+      count: route.stops.length,
+      reason,
+    });
+  });
+  const floorStats: FloorStats = {
+    target: floorTarget,
+    techDays: routes.filter((route) => !pinOnly[route.tech]).length,
+    underFloor,
+    minPerTechDay: routes
+      .filter((route) => !pinOnly[route.tech])
+      .reduce((min, route) => Math.min(min, route.stops.length), Infinity),
+    search: lnsStats,
+  };
+
   const describe = (route: MutableRoute) => {
     const depot = startNode(route.tech);
     const home = endNode(route.tech);
@@ -875,6 +1061,13 @@ export function solveVrp(input: SolveInput): SolveResult {
       finishMin: Math.round(time + returnDriveMin),
       departMin: route.depart || dayStart[route.tech],
       withinWindow: time + at(matrix.minutes, size, prev, home) <= end,
+      plannerOvertime: (() => {
+        if (route.stops.every((id) => timedPin(id))) return false;
+        const bound = workBound(route.stops, route.tech);
+        const finish = time + at(matrix.minutes, size, prev, home);
+        const depart = route.depart || dayStart[route.tech];
+        return finish > bound.finish + 0.5 || finish - depart > bound.span + 0.5;
+      })(),
     };
   };
 
@@ -890,12 +1083,18 @@ export function solveVrp(input: SolveInput): SolveResult {
   let driveKm = 0;
   let served = 0;
   let overtimeRoutes = 0;
+  let bookedOvertimeRoutes = 0;
   for (const day of dayPlans) {
     for (const route of day.routes) {
       driveMin += route.totalDriveMin;
       driveKm += route.totalDriveKm;
       served += route.stops.length;
-      if (!route.withinWindow) overtimeRoutes += 1;
+      if (!route.withinWindow) {
+        // Seuls les rendez-vous fixes peuvent dépasser la journée ; le
+        // planificateur ne l'allonge jamais au-delà de ce qu'ils imposent.
+        if (route.plannerOvertime) overtimeRoutes += 1;
+        else bookedOvertimeRoutes += 1;
+      }
       for (const stop of route.stops) {
         const index = calls.findIndex((appel) => appel.id === stop.appel.id);
         if (index >= 0) servedDay.set(index, day.date);
@@ -956,6 +1155,8 @@ export function solveVrp(input: SolveInput): SolveResult {
       remoteCalls: remoteIndexes.length,
       elapsedMs: Date.now() - started,
       overtimeRoutes,
+      bookedOvertimeRoutes,
+      floor: floorStats,
     },
   };
 }

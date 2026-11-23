@@ -77,6 +77,21 @@ type PlanResponse = {
   error?: string;
 };
 
+/** Journées sous le plancher, regroupées par raison (affichées sous le plan). */
+function underFloorLines(stats: PlanStats | null | undefined, techs: Tech[]): string[] {
+  const floor = stats?.floor;
+  if (!floor || floor.underFloor.length === 0) return [];
+  const names = new Map(techs.map((tech) => [tech.id, tech.name.split(" · ")[0]]));
+  const byReason = new Map<string, string[]>();
+  for (const item of floor.underFloor) {
+    const label = `${names.get(item.techId) ?? item.techId} ${item.date.slice(8, 10)}/${item.date.slice(5, 7)} (${item.count})`;
+    byReason.set(item.reason, [...(byReason.get(item.reason) ?? []), label]);
+  }
+  return [...byReason.entries()].map(
+    ([reason, labels]) => `Sous ${floor.target} appels : ${labels.join(", ")}. ${reason}`,
+  );
+}
+
 function toTechRoutes(
   day: PlanDayResponse,
   techs: Tech[],
@@ -1321,7 +1336,19 @@ function Workspace() {
               remoteTrips={remoteTrips}
               planSummary={
                 planStats
-                  ? `${planStats.served} arrêts tenus avant 17 h · ${formatHoursFr(planStats.driveMin)} de route · ${planStats.remoteCalls} appel(s) en voyage dédié`
+                  ? [
+                      `${planStats.served} arrêts tenus avant 17 h`,
+                      planStats.floor && planStats.floor.techDays > 0
+                        ? `${(planStats.served / planStats.floor.techDays).toFixed(1).replace(".", ",")} appels par technicien et par jour (plancher visé : ${planStats.floor.target}, ${planStats.floor.techDays - planStats.floor.underFloor.length} journées sur ${planStats.floor.techDays} l'atteignent)`
+                        : "",
+                      `${formatHoursFr(planStats.driveMin)} de route`,
+                      `${planStats.remoteCalls} appel(s) en voyage dédié`,
+                      planStats.bookedOvertimeRoutes
+                        ? `${planStats.bookedOvertimeRoutes} journée(s) dépassent 17 h à cause de rendez-vous fixes déjà pris`
+                        : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")
                   : undefined
               }
               planWarning={
@@ -1347,6 +1374,7 @@ function Workspace() {
                     ? "Départs estimés : premier arrêt habituel, à confirmer"
                     : "",
                   ...(planStats?.addressWarnings ?? []),
+                  ...underFloorLines(planStats, techs),
                 ]
                   .filter(Boolean)
                   .join(" · ") || undefined

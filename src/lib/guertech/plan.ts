@@ -45,6 +45,16 @@ export async function planDispatch(input: {
   bases?: Record<string, TechBase>;
   env?: EnvMap;
   fetchImpl?: typeof fetch;
+  /** Réglages du solveur (tests et banc d'essai). */
+  solverOptions?: {
+    improveMs?: number;
+    improveIterations?: number;
+    improveSeed?: number;
+    floorPerTechDay?: number;
+    workday?: { start: number; end: number };
+    /** Analyse de sensibilité seulement : multiplie les temps de route. Jamais exposé à l'interface. */
+    driveScale?: number;
+  };
 }): Promise<DispatchPlan> {
   const env = input.env ?? {};
   const fetchImpl = input.fetchImpl ?? fetch;
@@ -126,7 +136,15 @@ export async function planDispatch(input: {
     now: travelStarted,
   });
   const travelMs = Date.now() - travelStarted;
+  const driveScale = input.solverOptions?.driveScale;
+  if (driveScale && driveScale !== 1) {
+    for (let index = 0; index < matrix.minutes.length; index += 1) {
+      const value = matrix.minutes[index];
+      if (value > 0) matrix.minutes[index] = Math.max(1, value * driveScale);
+    }
+  }
   const solved = solveVrp({
+    ...(input.solverOptions ?? {}),
     calls: located,
     techs: present,
     matrix,

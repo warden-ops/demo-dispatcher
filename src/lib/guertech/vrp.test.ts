@@ -55,6 +55,9 @@ function solve(
     horizonDays?: number;
     profiles?: ProfileMap;
     pinOnlyTechIds?: string[];
+    floorPerTechDay?: number;
+    improveIterations?: number;
+    workday?: { start: number; end: number };
   },
 ) {
   const points = [
@@ -73,6 +76,9 @@ function solve(
     budgetMs: 700,
     profiles: extra?.profiles,
     pinOnlyTechIds: extra?.pinOnlyTechIds,
+    floorPerTechDay: extra?.floorPerTechDay,
+    improveIterations: extra?.improveIterations ?? 2000,
+    workday: extra?.workday,
   });
 }
 
@@ -619,3 +625,96 @@ describe("repli d'adresse", () => {
     assert.deepEqual([...(byTech.get("road") ?? [])].sort(), ["P1", "P2"]);
   });
 });
+
+describe("objectif : plus d'appels par technicien et par jour", () => {
+  const montreal = (count: number, prefix = "M") =>
+    Array.from({ length: count }, (_, index) =>
+      call({
+        id: `${prefix}${index}`,
+        ville: "Montréal",
+        lat: 45.5 + (index % 6) * 0.004,
+        lng: -73.57 + Math.floor(index / 6) * 0.004,
+      }),
+    );
+
+  it("jamais de dépassement de la journée : retour avant 17 h et au plus 9 h de travail", () => {
+    const result = solve(montreal(40), [tech("1"), tech("2")], { horizonDays: 2, pmQuotaPerDay: 40 });
+    for (const day of result.days) {
+      for (const route of day.routes) {
+        assert.ok(route.finishMin <= 17 * 60, `${route.techId} finit à ${route.finishMin}`);
+        assert.ok(route.finishMin - route.departMin <= 9 * 60, `${route.techId} travaille ${route.finishMin - route.departMin} min`);
+        assert.ok(route.departMin >= 8 * 60, `${route.techId} part à ${route.departMin}`);
+      }
+    }
+    assert.equal(result.stats.overtimeRoutes, 0);
+  });
+
+  it("un rendez-vous fixe lointain est respecté, la journée n'est pas allongée et ne compte pas sous le plancher", () => {
+    const montrealPin = call({
+      id: "MP",
+      ville: "Montréal",
+      type: "reactif",
+      planifie: true,
+      heure: "14:45",
+      scheduledOn: "2026-11-11",
+      techId: "2",
+    });
+    const far = call({
+      id: "SI",
+      ville: "Sept-Îles",
+      planifie: true,
+      heure: "13:00",
+      scheduledOn: "2026-11-11",
+      techId: "1",
+    });
+    const result = solve([far, montrealPin, ...montreal(12)], [tech("1"), tech("2")], { horizonDays: 1, pmQuotaPerDay: 40 });
+    const route = result.days[0].routes.find((item) => item.techId === "1");
+    assert.ok(route, "la journée du rendez-vous existe");
+    assert.deepEqual(route.stops.map((stop) => stop.appel.id), ["SI"]);
+    // Rendez-vous à 14 h 45 à Montréal (2 h) : retour au dépôt après 17 h, imposé.
+    // Le planificateur peut ajouter des appels le matin, sans finir plus tard.
+    const pinned = result.days[0].routes.find((item) => item.techId === "2");
+    assert.ok(pinned);
+    const pinStop = pinned.stops.find((stop) => stop.appel.id === "MP");
+    assert.ok(pinStop);
+    const forcedFinish = pinStop.leaveMin + pinned.returnDriveMin;
+    assert.ok(pinned.finishMin <= forcedFinish + 1, `${pinned.finishMin} contre ${forcedFinish}`);
+    assert.ok(pinned.stops.length > 1, "appels ajoutés avant le rendez-vous");
+    assert.equal(result.stats.overtimeRoutes, 0);
+    assert.equal(result.stats.bookedOvertimeRoutes, 2);
+    const under = result.stats.floor?.underFloor.find((item) => item.techId === "1");
+    assert.match(under?.reason ?? "", /rendez-vous fixes/);
+  });
+
+  it("remplit chaque journée jusqu'au plancher quand les appels existent", () => {
+    const calls = Array.from({ length: 30 }, (_, index) =>
+      call({ id: `D${index}`, ville: "Drummondville", lat: 45.87 + (index % 5) * 0.006, lng: -72.5 + Math.floor(index / 5) * 0.006 }),
+    );
+    const result = solve(calls, [tech("1"), tech("2")], { horizonDays: 2, pmQuotaPerDay: 40 });
+    const counts = result.days.flatMap((day) => day.routes.map((route) => route.stops.length));
+    assert.equal(counts.length, 4);
+    assert.ok(Math.min(...counts) >= 5, counts.join(" "));
+    assert.equal(result.stats.floor?.minPerTechDay, Math.min(...counts));
+    assert.equal(result.stats.floor?.underFloor.length, 0);
+  });
+
+  it("place au moins autant d'appels que la construction seule, sans plus de route par appel", () => {
+    const calls = [...montreal(24), ...montreal(6, "L").map((item, index) => ({ ...item, ville: "Longueuil", lat: 45.53 + index * 0.003, lng: -73.51 }))];
+    const base = solve(calls, [tech("1"), tech("2")], { horizonDays: 2, pmQuotaPerDay: 40, improveIterations: 0 });
+    const improved = solve(calls, [tech("1"), tech("2")], { horizonDays: 2, pmQuotaPerDay: 40 });
+    assert.ok(improved.stats.served >= base.stats.served, `${improved.stats.served} contre ${base.stats.served}`);
+    if (improved.stats.served === base.stats.served) {
+      assert.ok(improved.stats.driveMin <= base.stats.driveMin + 1);
+    }
+    assert.ok(improved.stats.floor?.search.iterations && improved.stats.floor.search.iterations > 0);
+  });
+
+  it("journée de travail réglable : 7 h 30 à 17 h laisse place à plus d'appels qu'à 8 h", () => {
+    const calls = montreal(30);
+    const normal = solve(calls, [tech("1")], { horizonDays: 1, pmQuotaPerDay: 40 });
+    const longer = solve(calls, [tech("1")], { horizonDays: 1, pmQuotaPerDay: 40, workday: { start: 450, end: 1020 } });
+    assert.ok(longer.stats.served >= normal.stats.served);
+    for (const route of longer.days[0].routes) assert.ok(route.departMin >= 450 && route.finishMin <= 1020);
+  });
+});
+

@@ -130,13 +130,13 @@ describe("départs estimés par secteur (option, désactivés par défaut)", () 
 });
 
 describe("quota préventif par défaut", () => {
-  it("laisse de la place pour 5 visites par technicien présent", () => {
-    assert.equal(PM_PER_TECH_DAY, 5);
-    assert.equal(defaultPmQuota(9, 6.3), 45);
+  it("laisse de la place pour 8 préventifs par technicien présent (le quota ne bloque plus les tournées)", () => {
+    assert.equal(PM_PER_TECH_DAY, 8);
+    assert.equal(defaultPmQuota(9, 6.3), 72);
   });
 
   it("ne descend jamais sous le rythme Q4 et plafonne à 80", () => {
-    assert.equal(defaultPmQuota(0, 6.3), 7);
+    assert.equal(defaultPmQuota(0, 6.3), 8);
     assert.equal(defaultPmQuota(1, 12.2), 13);
     assert.equal(defaultPmQuota(30, 6.3), 80);
   });

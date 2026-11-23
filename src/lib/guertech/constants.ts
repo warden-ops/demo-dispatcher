@@ -115,10 +115,12 @@ export function preventifPerBusinessDay(fromIso: string): number {
 }
 
 /**
- * Visites visées par technicien de route et par journée. L'historique NetSuite (août-novembre 2026)
- * donne 4 à 5 visites par jour pour les techniciens sur la route.
+ * Plafond de préventifs par technicien de route et par journée, pour le quota par défaut.
+ * L'historique NetSuite (août-novembre 2026) donne 4 à 5 visites par jour ; à 5, le quota
+ * bloquait le planificateur certains jours. À 8, ce sont la route et la fin de journée qui
+ * limitent chaque tournée, pas le quota.
  */
-export const PM_PER_TECH_DAY = 5;
+export const PM_PER_TECH_DAY = 8;
 
 /**
  * Quota préventif par défaut quand le champ est vide : assez de place pour remplir les journées
