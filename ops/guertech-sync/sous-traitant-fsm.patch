@@ -1,0 +1,36 @@
+--- sync_prod_to_sandbox.py	2026-11-26 15:10:15.244500625 -0500
++++ sync_prod_to_sandbox.py	2026-11-26 15:10:15.244500625 -0500
+@@ -121,7 +121,7 @@
+  TO_CHAR(s.custevent_nx_end_date,'YYYY-MM-DD') AS nx_ed, TO_CHAR(s.custevent_nx_end_time,'HH24:MI') AS nx_et,
+  s.custevent_nx_time_zone AS tz, s.custevent_nxc_service_report_language AS lang, s.custevent_nxc_cust_name_to_contractor AS cust_contractor,
+  s.custevent_nx_case_details AS details, s.custevent_nx_case_purchaseorder AS po, s.custevent_nx_customer_name AS cust_name, s.phone,
+- s.custevent_nxc_subcontractor_case AS subcase, s.custevent_nx_assets AS assets,
++ s.custevent_nxc_subcontractor_case AS subcase, s.custevent_nx_assets AS assets, s.custevent_fsm_subcontractor AS fsm_sub,
+  TO_CHAR(s.datecreated,'YYYY-MM-DD HH24:MI') AS created, TO_CHAR(s.lastmodifieddate,'YYYY-MM-DD HH24:MI:SS') AS modified
+ FROM supportcase s WHERE {where} ORDER BY s.lastmodifieddate, s.id"""
+ TASK_SQL = """SELECT t.id, t.title, t.supportcase, t.company, t.custevent_nx_customer AS cust, t.custevent_nx_task_type AS ttype,
+@@ -282,7 +282,11 @@
+         if eq: b['custevent_nx_assets'] = {'items': eq}   # equipement de l'appel (apercu du planificateur)
+         if self.a.source == 'prod' and not self.a.placeholder_techs and c['assigned'] and str(c['assigned']) in self.emp_ok:
+             b['assigned'] = {'id': str(c['assigned'])}
+-        return {k: v for k, v in b.items() if v not in (None, '')}
++        out = {k: v for k, v in b.items() if v not in (None, '')}
++        # sous-traitant FSM: copie aussi quand il est vide en prod (null efface la valeur du sandbox);
++        # sinon un cas repris a l'interne reste exclu du planificateur
++        if self.a.source == 'prod': out['custevent_fsm_subcontractor'] = ref(c['fsm_sub'])
++        return out
+ 
+     def task_body(self, t, sb_case, case_company=None):
+         b = {'title': (self.title_prefix + (t['title'] or f"Tache {t['id']}"))[:199], 'supportCase': ref(sb_case),
+@@ -363,6 +367,11 @@
+             self.log(niveau='avis', msg='equipements refuses, nouvel essai sans', eid=e, code=w.status_code, detail=w.text[:200])
+             body = {k: v for k, v in body.items() if k != 'custevent_nx_assets'}
+             w = self.sb.request('PUT', f'/services/rest/record/v1/{rtype}/eid:{e}', body)
++        if w.status_code not in (200, 204) and body.get('custevent_fsm_subcontractor'):
++            # sous-traitant prod absent du sandbox: on n'empeche pas la copie du cas (la case a cocher reste copiee)
++            self.log(niveau='avis', msg='sous-traitant FSM refuse, nouvel essai sans', eid=e, code=w.status_code, detail=w.text[:200])
++            body = {k: v for k, v in body.items() if k != 'custevent_fsm_subcontractor'}
++            w = self.sb.request('PUT', f'/services/rest/record/v1/{rtype}/eid:{e}', body)
+         if w.status_code not in (200, 204):
+             self.stats['erreurs'] += 1; self.log(niveau='erreur', type=table, eid=e, code=w.status_code, detail=w.text[:400]); return sid
+         created = sid is None

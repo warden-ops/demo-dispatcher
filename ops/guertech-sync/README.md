@@ -57,3 +57,29 @@ déploiement 18531 (filtrage par contexte).
 
 Application : même marche que plus haut (copie de sauvegarde, `sudo patch`,
 puis vérifier au passage suivant du minuteur : bilan sans erreur, plus de courriel).
+
+## Sous-traitant FSM (2026-11-26)
+
+Constat le 2026-11-26 : le cas CASE18282 (prod 562671, réactif « À replanifier »,
+tâche du 27 nov.) n'est plus sous-traité en prod, mais sa copie du sandbox
+gardait le sous-traitant FSM 4630 du rafraichissement du 11 nov. Le planificateur
+l'excluait donc comme « sous-traitant ». La synchro ne lisait pas
+`custevent_fsm_subcontractor` et ne vidait jamais un champ devenu vide en prod.
+
+`sous-traitant-fsm.patch` (à appliquer après `clients-sans-reecriture.patch`,
+sha256 avant : 5b4ce2d73fc24f34ac060c8ddc153a87ca1a363007f6b5065c9500459812877c,
+après : 7ec2a7bd38fe31f6b756984b022c7d8a603a9ea37d2cb339b888b48c63e4b925) :
+
+- lit `custevent_fsm_subcontractor` sur chaque cas prod ;
+- l'écrit sur la copie du sandbox, avec `null` quand il est vide en prod (efface
+  la valeur restée dans le sandbox) ;
+- si le sandbox refuse un sous-traitant prod qu'il ne connaît pas, le cas est
+  réécrit sans ce champ (la case à cocher Subcontractor case reste copiée).
+
+Appliqué sur le VPS le 2026-11-26 à 15 h 09 (Toronto), avec l'accord d'Alexandre.
+Copie de sauvegarde : `/opt/guertech-sync/bin/sync_prod_to_sandbox.py.bak-20261126-200924`.
+Écriture ponctuelle (sandbox seulement) : `--case-ids 562671 --execute`, à 15 h 10,
+bilan 1 cas mis à jour, 0 erreur. Le cas s'affiche maintenant dans le planificateur.
+
+Les cas qui changent en prod passent par ce chemin au fil des passages de 15 min.
+Pas de passe de suppression : une tâche effacée en prod reste dans le sandbox.
